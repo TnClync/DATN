@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual environment
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs & temporary files
+*.log
+*.tmp
+spark-warehouse/
+spark-tmp/
+
+# Generated serving cache (build lại bằng scripts/build_serving_cache.py)
+models/serving/
+
+# Model artifacts lớn — giữ lại cấu hình nhỏ trong models/hybrid/
+models/als/
+models/bpr_mf/
+models/content_based/
+
+# Kết quả sinh ra khi chạy demo
+outputs/*.csv
+outputs/bpr_mf/

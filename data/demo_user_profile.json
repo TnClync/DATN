@@ -1,0 +1,39 @@
+{
+  "sample_users": [
+    {
+      "reviewerID": "A1IPEJDMQNXJYF",
+      "user_name": "Tech Enthusiast (PC & Cooling Fans)",
+      "domain_preference": "Electronics",
+      "interacted_items": ["B000WUKQBG", "B004QS4OF4"],
+      "description": "Thường mua quạt tản nhiệt LED và linh kiện phần cứng máy tính."
+    },
+    {
+      "reviewerID": "A12C7JY236MJ6U",
+      "user_name": "Photographer (Camera & Lenses)",
+      "domain_preference": "Electronics",
+      "interacted_items": ["B0006NAB96"],
+      "description": "Quan tâm đến máy ảnh Olympus E500, ống kính và thiết bị quang học."
+    },
+    {
+      "reviewerID": "A2ER9SRSFRM5IO",
+      "user_name": "Networking & Home Office User",
+      "domain_preference": "Electronics",
+      "interacted_items": ["B004QS4OF4", "B000FVTPX2"],
+      "description": "Thường xuyên mua thiết bị mạng Wifi USB Cisco Valet và phụ kiện kết nối."
+    },
+    {
+      "reviewerID": "A34188AG8SK70T",
+      "user_name": "Audio / Video Gear Enthusiast",
+      "domain_preference": "Electronics",
+      "interacted_items": ["B000FVTPX2"],
+      "description": "Khách hàng mua anten thu sóng TV kỹ thuật số và thiết bị chuyển đổi tín hiệu."
+    },
+    {
+      "reviewerID": "A0001528BGUBOEVR6T5U",
+      "user_name": "Avid Book Reader",
+      "domain_preference": "Books",
+      "interacted_items": ["B001GZ6QEC", "B002J4U8LU"],
+      "description": "Đọc giả thường xuyên mua sách văn học, tiểu thuyết và kỹ năng."
+    }
+  ]
+}
