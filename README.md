@@ -77,6 +77,15 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
+Các thư viện chính (khai báo trong `pyproject.toml`):
+
+- `numpy`, `pandas`, `pyarrow` — xử lý dữ liệu
+- `pyspark` — train ALS / TF-IDF
+- `torch` — BPR-MF & Hybrid
+- `streamlit` — web demo
+- `requests` — gọi JevOS (Inference)
+- `kaggle` — tải output từ Kaggle
+
 ### 1. Build serving cache (chỉ một lần)
 
 Cache giúp app mở nhanh và không ngốn RAM. Cần chạy lại khi dữ liệu model thay đổi.
