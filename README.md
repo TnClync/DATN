@@ -16,6 +16,7 @@ Hệ thống khuyến nghị sản phẩm lai ghép (Hybrid Recommender System) 
 DATN/
 ├── app.py                          # Web demo Streamlit (tự chạy khi nhập user)
 ├── main.py                         # CLI demo nhanh
+├── test.py                         # Test serving/hybrid/content-based
 ├── config.py                       # Cấu hình đường dẫn & tham số
 ├── pyproject.toml                  # Dependencies (uv / pip)
 ├── .gitignore
@@ -56,6 +57,7 @@ DATN/
     ├── MostPopRec.py               # Baseline popularity
     └── models/
         ├── __init__.py
+        ├── bpr_recommender.py      # BPR-MF recommender (checkpoint Kaggle)
         ├── hybrid_recommender.py   # ⭐ API gợi ý lai ghép
         ├── serving_store.py        # ⭐ Cache + truy vấn tiết kiệm RAM
         └── train_content_tfidf.py  # Train TF-IDF content-based
