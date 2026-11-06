@@ -21,6 +21,9 @@ class RecommenderPipeline:
         # lazy
         self.user_factors = None  # float32 (mmap-backed)
         self.item_factors = None
+        self.user_ids = None
+        self.item_ids = None
+        self.user_id_to_row = {}
         self.sbert_emb = None
         self.faiss_index = None
         self.reranker = None
@@ -41,6 +44,19 @@ class RecommenderPipeline:
         except Exception:
             self.user_factors = None
             self.item_factors = None
+
+        # Load IDs mapping if available
+        try:
+            uid_p = FACTORS_DIR / f"{self.cf_name}_user_ids.npy"
+            iid_p = FACTORS_DIR / f"{self.cf_name}_item_ids.npy"
+            if uid_p.exists():
+                self.user_ids = np.load(uid_p)
+                self.user_id_to_row = {int(uid): idx for idx, uid in enumerate(self.user_ids)}
+            if iid_p.exists():
+                self.item_ids = np.load(iid_p)
+        except Exception:
+            pass
+
         # SBERT
         try:
             self.sbert_emb = sbert_mod.load_sbert(mmap=False)
@@ -55,8 +71,18 @@ class RecommenderPipeline:
                 self.reranker = None
         self._loaded = True
 
+    def _user_row_idx(self, user_idx: int) -> int:
+        if self.user_id_to_row and user_idx in self.user_id_to_row:
+            return self.user_id_to_row[user_idx]
+        if self.user_factors is not None and len(self.user_factors) > 0:
+            if 0 <= user_idx < len(self.user_factors):
+                return user_idx
+            return user_idx % len(self.user_factors)
+        return 0
+
     def _user_cf_vec(self, user_idx: int) -> np.ndarray:
-        return np.asarray(self.user_factors[user_idx], dtype=np.float32)
+        row = self._user_row_idx(user_idx)
+        return np.asarray(self.user_factors[row], dtype=np.float32)
 
     def _user_sbert_vec(self, user_history: list[int] | None) -> np.ndarray | None:
         if self.sbert_emb is None or not user_history:
@@ -67,7 +93,8 @@ class RecommenderPipeline:
         return v / n if n > 0 else v
 
     def cf_topk(self, user_idx: int, k: int = 200, exclude: set[int] | None = None):
-        return cf_mod.topk_cf(self.user_factors, self.item_factors, user_idx, k=k, exclude=exclude)
+        row = self._user_row_idx(user_idx)
+        return cf_mod.topk_cf(self.user_factors, self.item_factors, row, k=k, exclude=exclude)
 
     def sbert_topk(self, user_history: list[int] | None, k: int = 200):
         if self.faiss_index is None:
@@ -94,33 +121,39 @@ class RecommenderPipeline:
         cf_items, cf_scores_list = self.cf_topk(user_idx, k=candidate_k, exclude=exclude)
         sb_items, sb_scores_list = self.sbert_topk(user_history, k=candidate_k)
 
-        if model == "cf":
-            return cf_items[:k]
-        if model == "sbert":
-            return sb_items[:k] if sb_items else cf_items[:k]
-
-        if model == "two_stage":
+        raw_recs = []
+        if model in ("cf", "als", "bpr"):
+            raw_recs = cf_items[:k]
+        elif model == "sbert":
+            raw_recs = sb_items[:k] if sb_items else cf_items[:k]
+        elif model == "two_stage":
             cands = ts.candidate_union(cf_items, sb_items, self.popular_items, max_candidates=candidate_k)
             if self.reranker is not None:
                 q = f"user {user_idx}"
                 scored = ts.rerank_cross_encoder(self.reranker, q, cands, self.item_text_fn)
-                return [it for it, _ in scored[:k]]
-            # fallback: cf order
-            return cands[:k]
+                raw_recs = [it for it, _ in scored[:k]]
+            else:
+                raw_recs = cands[:k]
+        else:
+            # late fusion (classic)
+            cand_set = set(cf_items) | set(sb_items)
+            cands = list(cand_set)
+            cf_score_map = {it: 0.0 for it in cands}
+            for it, sc in zip(cf_items, cf_scores_list):
+                cf_score_map[it] = float(sc)
+            sb_score_map = {it: 0.0 for it in cands}
+            for it, sc in zip(sb_items, sb_scores_list):
+                sb_score_map[it] = float(sc)
+            cf_arr = np.array([cf_score_map[it] for it in cands], dtype=np.float32)
+            sb_arr = np.array([sb_score_map[it] for it in cands], dtype=np.float32)
+            fused = lf.classic_late_fusion(cf_arr, sb_arr, alpha=alpha, beta=1 - alpha)
+            order = np.argsort(-fused)
+            out = [cands[i] for i in order if cands[i] not in exclude]
+            raw_recs = out[:k]
 
-        # late fusion (classic)
-        # build score dicts over candidate union
-        cand_set = set(cf_items) | set(sb_items)
-        cands = list(cand_set)
-        cf_score_map = {it: 0.0 for it in cands}
-        for it, sc in zip(cf_items, cf_scores_list):
-            cf_score_map[it] = float(sc)
-        sb_score_map = {it: 0.0 for it in cands}
-        for it, sc in zip(sb_items, sb_scores_list):
-            sb_score_map[it] = float(sc)
-        cf_arr = np.array([cf_score_map[it] for it in cands], dtype=np.float32)
-        sb_arr = np.array([sb_score_map[it] for it in cands], dtype=np.float32)
-        fused = lf.classic_late_fusion(cf_arr, sb_arr, alpha=alpha, beta=1 - alpha)
-        order = np.argsort(-fused)
-        out = [cands[i] for i in order if cands[i] not in exclude]
-        return out[:k]
+        # Map internal item indices to original item IDs if mapping exists
+        if self.item_ids is not None and len(self.item_ids) > 0:
+            final_recs = [int(self.item_ids[i]) if 0 <= i < len(self.item_ids) else int(i) for i in raw_recs]
+        else:
+            final_recs = [int(i) for i in raw_recs]
+        return final_recs

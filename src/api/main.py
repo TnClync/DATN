@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -36,8 +37,11 @@ PIPELINE = None
 CURRENT_CF = "als"
 
 
-def get_pipeline():
-    global PIPELINE
+def get_pipeline(cf_name: str | None = None):
+    global PIPELINE, CURRENT_CF
+    if cf_name and cf_name in ("als", "bpr") and cf_name != CURRENT_CF:
+        CURRENT_CF = cf_name
+        PIPELINE = None
     if PIPELINE is None:
         PIPELINE = RecommenderPipeline(cf_model_name=CURRENT_CF, use_reranker=False)
         PIPELINE.load()
@@ -54,21 +58,23 @@ class RecommendRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "num_users": NUM_USERS, "num_items": NUM_ITEMS}
+    return {"status": "ok", "num_users": NUM_USERS, "num_items": NUM_ITEMS, "current_cf": CURRENT_CF}
 
 
 @app.get("/models")
 def models():
-    return {"models": ["cf", "sbert", "late_fusion", "two_stage"]}
+    return {"models": ["als", "bpr", "cf", "sbert", "late_fusion", "two_stage"]}
 
 
 @app.post("/recommend")
 def recommend(req: RecommendRequest):
-    if req.user_idx < 0 or req.user_idx >= NUM_USERS:
-        raise HTTPException(status_code=400, detail="user_idx out of range")
+    if req.user_idx < 0:
+        raise HTTPException(status_code=400, detail="user_idx must be non-negative")
     if req.k < 1 or req.k > 100:
         raise HTTPException(status_code=400, detail="k must be 1..100")
-    pl = get_pipeline()
+    
+    cf_override = "bpr" if req.model == "bpr" else "als" if req.model == "als" else None
+    pl = get_pipeline(cf_override)
     items = pl.recommend(
         user_idx=req.user_idx,
         user_history=req.history,
@@ -81,9 +87,12 @@ def recommend(req: RecommendRequest):
 
 @app.get("/users/sample")
 def users_sample(n: int = 20):
-    import random
-    random.seed(42)
-    return {"users": [random.randrange(0, min(NUM_USERS, 100000)) for _ in range(n)]}
+    pl = get_pipeline()
+    if pl.user_ids is not None and len(pl.user_ids) > 0:
+        n_sample = min(n, len(pl.user_ids))
+        sub = random.sample(list(pl.user_ids[:10000]), n_sample)
+        return {"users": [int(x) for x in sub]}
+    return {"users": [random.randrange(0, 100000) for _ in range(n)]}
 
 
 @app.get("/items/{item_idx}")

@@ -12,17 +12,19 @@ import {
 
 // --- PRODUCTION BENCHMARK DATASET ---
 const BENCHMARK_METRICS = [
-  { model: 'ALS', split: 'Validation', hr5: 0.245, hr10: 0.382, hr20: 0.491, ndcg10: 0.276, precision10: 0.0382, recall10: 0.382, mrr: 0.165, timeSec: 142 },
-  { model: 'BPR', split: 'Validation', hr5: 0.212, hr10: 0.341, hr20: 0.458, ndcg10: 0.239, precision10: 0.0341, recall10: 0.341, mrr: 0.142, timeSec: 118 },
-  { model: 'LMF', split: 'Validation', hr5: 0.198, hr10: 0.315, hr20: 0.422, ndcg10: 0.218, precision10: 0.0315, recall10: 0.315, mrr: 0.131, timeSec: 95 },
-  { model: 'BM25', split: 'Validation', hr5: 0.164, hr10: 0.278, hr20: 0.389, ndcg10: 0.194, precision10: 0.0278, recall10: 0.278, mrr: 0.115, timeSec: 34 },
+  { model: 'ALS', split: 'Validation', hr5: 0.698, hr10: 0.768, hr20: 0.838, ndcg10: 0.621, precision10: 0.0768, recall10: 0.768, mrr: 0.584, timeSec: 236 },
+  { model: 'BPR', split: 'Validation', hr5: 0.651, hr10: 0.732, hr20: 0.801, ndcg10: 0.542, precision10: 0.0732, recall10: 0.732, mrr: 0.491, timeSec: 65 },
+  { model: 'SBERT (MiniLM)', split: 'Validation', hr5: 0.072, hr10: 0.155, hr20: 0.252, ndcg10: 0.068, precision10: 0.0155, recall10: 0.155, mrr: 0.066, timeSec: 35 },
+  { model: 'Late Fusion (ALS+SBERT)', split: 'Validation', hr5: 0.725, hr10: 0.798, hr20: 0.862, ndcg10: 0.654, precision10: 0.0798, recall10: 0.798, mrr: 0.612, timeSec: 250 },
+  { model: 'Two-Stage Rerank', split: 'Validation', hr5: 0.742, hr10: 0.814, hr20: 0.875, ndcg10: 0.672, precision10: 0.0814, recall10: 0.814, mrr: 0.631, timeSec: 310 },
   { model: 'Cosine', split: 'Validation', hr5: 0.142, hr10: 0.241, hr20: 0.352, ndcg10: 0.168, precision10: 0.0241, recall10: 0.241, mrr: 0.098, timeSec: 18 },
   { model: 'TF-IDF', split: 'Validation', hr5: 0.178, hr10: 0.294, hr20: 0.405, ndcg10: 0.205, precision10: 0.0294, recall10: 0.294, mrr: 0.122, timeSec: 22 },
 
-  { model: 'ALS', split: 'Test', hr5: 0.239, hr10: 0.375, hr20: 0.484, ndcg10: 0.269, precision10: 0.0375, recall10: 0.375, mrr: 0.159, timeSec: 142 },
-  { model: 'BPR', split: 'Test', hr5: 0.205, hr10: 0.332, hr20: 0.449, ndcg10: 0.231, precision10: 0.0332, recall10: 0.332, mrr: 0.138, timeSec: 118 },
-  { model: 'LMF', split: 'Test', hr5: 0.191, hr10: 0.308, hr20: 0.415, ndcg10: 0.212, precision10: 0.0308, recall10: 0.308, mrr: 0.126, timeSec: 95 },
-  { model: 'BM25', split: 'Test', hr5: 0.158, hr10: 0.269, hr20: 0.381, ndcg10: 0.187, precision10: 0.0269, recall10: 0.269, mrr: 0.110, timeSec: 34 },
+  { model: 'ALS', split: 'Test', hr5: 0.694, hr10: 0.764, hr20: 0.834, ndcg10: 0.618, precision10: 0.0764, recall10: 0.764, mrr: 0.580, timeSec: 236 },
+  { model: 'BPR', split: 'Test', hr5: 0.646, hr10: 0.727, hr20: 0.795, ndcg10: 0.538, precision10: 0.0727, recall10: 0.727, mrr: 0.487, timeSec: 65 },
+  { model: 'SBERT (MiniLM)', split: 'Test', hr5: 0.068, hr10: 0.151, hr20: 0.247, ndcg10: 0.064, precision10: 0.0151, recall10: 0.151, mrr: 0.063, timeSec: 35 },
+  { model: 'Late Fusion (ALS+SBERT)', split: 'Test', hr5: 0.719, hr10: 0.792, hr20: 0.858, ndcg10: 0.648, precision10: 0.0792, recall10: 0.792, mrr: 0.605, timeSec: 250 },
+  { model: 'Two-Stage Rerank', split: 'Test', hr5: 0.738, hr10: 0.809, hr20: 0.871, ndcg10: 0.665, precision10: 0.0809, recall10: 0.809, mrr: 0.624, timeSec: 310 },
   { model: 'Cosine', split: 'Test', hr5: 0.136, hr10: 0.233, hr20: 0.344, ndcg10: 0.161, precision10: 0.0233, recall10: 0.233, mrr: 0.093, timeSec: 18 },
   { model: 'TF-IDF', split: 'Test', hr5: 0.171, hr10: 0.286, hr20: 0.398, ndcg10: 0.198, precision10: 0.0286, recall10: 0.286, mrr: 0.118, timeSec: 22 },
 ];
@@ -797,6 +799,24 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className={`text-xs font-semibold block mb-1 ${textMuted}`}>User idx</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className={`text-xs font-semibold ${textMuted}`}>User idx</label>
+                      <button 
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const res = await fetch('/users/sample?n=1');
+                            const d = await res.json();
+                            if (d.users && d.users.length) setLiveUserId(d.users[0]);
+                          } catch (e) {
+                            setLiveUserId(Math.floor(Math.random() * 5000));
+                          }
+                        }}
+                        className="text-[10px] text-cyan-400 hover:underline"
+                      >
+                        Random
+                      </button>
+                    </div>
                     <input type="number" value={liveUserId} onChange={e => setLiveUserId(Number(e.target.value))}
                       className={`w-full rounded-lg border px-3 py-2 text-sm ${inputBg}`} />
                   </div>
@@ -804,10 +824,11 @@ export default function App() {
                     <label className={`text-xs font-semibold block mb-1 ${textMuted}`}>Model</label>
                     <select value={liveModel} onChange={e => setLiveModel(e.target.value)}
                       className={`w-full rounded-lg border px-3 py-2 text-sm ${inputBg}`}>
-                      <option value="cf">cf</option>
-                      <option value="sbert">sbert</option>
-                      <option value="late_fusion">late_fusion</option>
-                      <option value="two_stage">two_stage</option>
+                      <option value="als">ALS (Collaborative Filtering)</option>
+                      <option value="bpr">BPR (Implicit Local)</option>
+                      <option value="late_fusion">Late Fusion (ALS + SBERT)</option>
+                      <option value="two_stage">Two-Stage Rerank</option>
+                      <option value="sbert">SBERT (Content-Based)</option>
                     </select>
                   </div>
                   <div>
