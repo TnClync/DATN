@@ -1,0 +1,17 @@
+{
+  "id": "minhteonguyn/sbert-cb-faiss",
+  "title": "SBERT CB FAISS",
+  "code_file": "03_sbert_faiss.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

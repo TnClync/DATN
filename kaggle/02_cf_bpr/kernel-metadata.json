@@ -1,0 +1,16 @@
+{
+  "id": "nguynteo/bpr-cf-implicit",
+  "title": "BPR CF Implicit",
+  "code_file": "02_bpr_implicit.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}
