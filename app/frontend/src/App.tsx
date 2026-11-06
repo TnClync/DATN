@@ -11,32 +11,21 @@ import {
   Tag, ExternalLink, ThumbsUp, Plus, Info, Check, Filter
 } from 'lucide-react';
 
-// --- BENCHMARK DATA (MEASURED ON TEST DATASET - 1 POS + 99 NEGS PROTOCOL) ---
+// --- BENCHMARK DATA (100% THỰC NGHIỆM ĐÃ ĐO TRÊN TEST SET - 1 POS + 99 NEGS) ---
 const BENCHMARK_METRICS = [
   {
-    model: 'Two-Stage Rerank (Deep Hybrid)',
-    type: 'Deep Hybrid',
-    hr5: 0.738,
-    hr10: 0.809,
-    hr20: 0.871,
-    ndcg5: 0.635,
-    ndcg10: 0.665,
-    ndcg20: 0.684,
-    mrr: 0.624,
-    timeSec: 310,
-    best: true,
-  },
-  {
-    model: 'Late Fusion (ALS + SBERT)',
+    model: 'Late Fusion (ALS + SBERT, α=0.9)',
     type: 'Hybrid Baseline',
-    hr5: 0.719,
-    hr10: 0.792,
-    hr20: 0.858,
-    ndcg5: 0.618,
-    ndcg10: 0.648,
-    ndcg20: 0.669,
-    mrr: 0.605,
-    timeSec: 250,
+    hr5: 0.7040,
+    hr10: 0.7790,
+    hr20: 0.8335,
+    ndcg5: 0.5937,
+    ndcg10: 0.6181,
+    ndcg20: 0.6319,
+    mrr: 0.5744,
+    timeSec: 1,
+    status: 'Verified Test Metric',
+    best: true,
   },
   {
     model: 'ALS (implicit factors=64)',
@@ -49,6 +38,8 @@ const BENCHMARK_METRICS = [
     ndcg20: 0.6354,
     mrr: 0.5798,
     timeSec: 236,
+    status: 'Verified Test Metric',
+    best: false,
   },
   {
     model: 'BPR (implicit factors=32)',
@@ -61,10 +52,12 @@ const BENCHMARK_METRICS = [
     ndcg20: 0.5549,
     mrr: 0.4869,
     timeSec: 65,
+    status: 'Verified Test Metric',
+    best: false,
   },
   {
     model: 'SBERT (all-MiniLM-L6-v2)',
-    type: 'Content-Based',
+    type: 'Content-Based (FAISS)',
     hr5: 0.0685,
     hr10: 0.1507,
     hr20: 0.2466,
@@ -73,18 +66,29 @@ const BENCHMARK_METRICS = [
     ndcg20: 0.0888,
     mrr: 0.0633,
     timeSec: 35,
+    status: 'Verified Test Metric',
+    best: false,
+  },
+];
+
+const PENDING_MODELS = [
+  {
+    model: 'Two-Stage Retrieval + Cross-Encoder Reranker',
+    type: 'Deep Hybrid (Ưu tiên 1)',
+    planned: 'Candidate Union (300) -> bge-reranker-v2-m3 / ms-marco reranking',
+    status: 'Đang triển khai notebook trên Kaggle GPU (minhteonguyn)',
   },
   {
-    model: 'TF-IDF Content Baseline',
-    type: 'Heuristic',
-    hr5: 0.171,
-    hr10: 0.286,
-    hr20: 0.398,
-    ndcg5: 0.165,
-    ndcg10: 0.198,
-    ndcg20: 0.224,
-    mrr: 0.118,
-    timeSec: 22,
+    model: 'Light Gated Late Fusion',
+    type: 'Deep Hybrid (Ưu tiên 2)',
+    planned: 'Neural Gate (MLP 2 lớp) học trọng số alpha động theo từng User/Item',
+    status: 'Sắp huấn luyện trên Local CPU',
+  },
+  {
+    model: 'Deep Early Fusion',
+    type: 'Deep Hybrid (Ưu tiên 3)',
+    planned: 'Cross-Network ghép sớm vector nhúng CF và SBERT',
+    status: 'Kế hoạch tiếp theo',
   },
 ];
 
@@ -690,11 +694,11 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className={`p-4 rounded-2xl border ${cardBg}`}>
                 <div className={`text-xs ${textMuted} mb-1 flex items-center justify-between`}>
-                  <span>Top Model ĐATN</span>
+                  <span>Top Model Thực Nghiệm</span>
                   <Award className="h-4 w-4 text-cyan-400" />
                 </div>
-                <div className="text-lg font-extrabold text-cyan-300">Two-Stage Rerank</div>
-                <div className="text-xs text-emerald-400 font-mono mt-1">HR@10: 0.809 | NDCG@10: 0.665</div>
+                <div className="text-lg font-extrabold text-cyan-300">Late Fusion (α=0.9)</div>
+                <div className="text-xs text-emerald-400 font-mono mt-1">HR@10: 0.7790 | NDCG@10: 0.6181</div>
               </div>
 
               <div className={`p-4 rounded-2xl border ${cardBg}`}>
@@ -703,7 +707,7 @@ export default function App() {
                   <CheckCircle2 className="h-4 w-4 text-indigo-400" />
                 </div>
                 <div className="text-lg font-extrabold text-indigo-300">300k Users × 1.69M Items</div>
-                <div className="text-xs text-indigo-400 font-mono mt-1">HR@10: 0.764 | MRR: 0.580</div>
+                <div className="text-xs text-indigo-400 font-mono mt-1">HR@10: 0.7644 | MRR: 0.5798</div>
               </div>
 
               <div className={`p-4 rounded-2xl border ${cardBg}`}>
@@ -721,7 +725,7 @@ export default function App() {
                   <ShieldCheck className="h-4 w-4 text-emerald-400" />
                 </div>
                 <div className="text-lg font-extrabold text-emerald-300">1 Pos + 99 Negs</div>
-                <div className="text-xs text-slate-400 font-mono mt-1">Test Set Chuẩn ĐATN</div>
+                <div className="text-xs text-slate-400 font-mono mt-1">Chuẩn Test Set (N=2,000)</div>
               </div>
             </div>
 
@@ -778,6 +782,45 @@ export default function App() {
                         <td className="py-3.5 px-4 font-bold text-emerald-400">{row.ndcg10.toFixed(4)}</td>
                         <td className="py-3.5 px-4 text-pink-400">{row.mrr.toFixed(4)}</td>
                         <td className="py-3.5 px-4 text-right text-slate-400">{row.timeSec}s</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ROADMAP & PENDING DEEP HYBRIDS TABLE */}
+            <div className={`rounded-2xl border overflow-hidden ${cardBg}`}>
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-amber-400" /> Các Mô Hình Deep Hybrid Kế Tiếp (Theo Đề Cương ĐATN)
+                  </h3>
+                  <p className={`text-xs ${textMuted}`}>Các mô hình đang được chuẩn bị notebook và huấn luyện, chưa đưa số liệu vào bảng chính</p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className={`border-b border-slate-800 text-[11px] uppercase tracking-wider ${isDark ? 'bg-slate-950/80 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                    <tr>
+                      <th className="py-3 px-4">Mô Hình Đề Xuất</th>
+                      <th className="py-3 px-4">Độ Ưu Tiên</th>
+                      <th className="py-3 px-4">Kiến Trúc & Phương Pháp</th>
+                      <th className="py-3 px-4 text-right">Trạng Thái Thực Hiện</th>
+                    </tr>
+                  </thead>
+                  <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
+                    {PENDING_MODELS.map((m, idx) => (
+                      <tr key={idx} className={isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}>
+                        <td className="py-3 px-4 font-bold text-slate-300">{m.model}</td>
+                        <td className="py-3 px-4 text-indigo-400">{m.type}</td>
+                        <td className="py-3 px-4 text-slate-400">{m.planned}</td>
+                        <td className="py-3 px-4 text-right">
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                            {m.status}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
