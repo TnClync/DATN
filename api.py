@@ -73,6 +73,30 @@ class HealthResponse(BaseModel):
     device: str
 
 
+# ── Template (studio.tsx) static data exposed via FastAPI ─────────────────────
+BENCHMARK_METRICS = [
+    {"model": "ALS", "split": "Validation", "hr5": 0.245, "hr10": 0.382, "hr20": 0.491, "ndcg10": 0.276, "precision10": 0.0382, "recall10": 0.382, "mrr": 0.165, "timeSec": 142},
+    {"model": "BPR", "split": "Validation", "hr5": 0.212, "hr10": 0.341, "hr20": 0.458, "ndcg10": 0.239, "precision10": 0.0341, "recall10": 0.341, "mrr": 0.142, "timeSec": 118},
+    {"model": "LMF", "split": "Validation", "hr5": 0.198, "hr10": 0.315, "hr20": 0.422, "ndcg10": 0.218, "precision10": 0.0315, "recall10": 0.315, "mrr": 0.131, "timeSec": 95},
+    {"model": "BM25", "split": "Validation", "hr5": 0.164, "hr10": 0.278, "hr20": 0.389, "ndcg10": 0.194, "precision10": 0.0278, "recall10": 0.278, "mrr": 0.115, "timeSec": 34},
+    {"model": "Cosine", "split": "Validation", "hr5": 0.142, "hr10": 0.241, "hr20": 0.352, "ndcg10": 0.168, "precision10": 0.0241, "recall10": 0.241, "mrr": 0.098, "timeSec": 18},
+    {"model": "TF-IDF", "split": "Validation", "hr5": 0.178, "hr10": 0.294, "hr20": 0.405, "ndcg10": 0.205, "precision10": 0.0294, "recall10": 0.294, "mrr": 0.122, "timeSec": 22},
+    {"model": "ALS", "split": "Test", "hr5": 0.239, "hr10": 0.375, "hr20": 0.484, "ndcg10": 0.269, "precision10": 0.0375, "recall10": 0.375, "mrr": 0.159, "timeSec": 142},
+    {"model": "BPR", "split": "Test", "hr5": 0.205, "hr10": 0.332, "hr20": 0.449, "ndcg10": 0.231, "precision10": 0.0332, "recall10": 0.332, "mrr": 0.138, "timeSec": 118},
+]
+
+SAMPLE_USERS = [
+    {"id": 42, "name": "Tech Enthusiast & Home Audio Fan", "status": "Warm-Start", "interactionsCount": 48, "avgRating": 4.6},
+    {"id": 108, "name": "Smart Home & IoT Explorer", "status": "Warm-Start", "interactionsCount": 31, "avgRating": 4.3},
+    {"id": 256, "name": "New Shopper (Minimal History)", "status": "Semi Cold-Start", "interactionsCount": 3, "avgRating": 4.0},
+]
+
+ITEM_CATALOG = [
+    {"id": "ITEM_8801", "name": "Bose QuietComfort Ultra Earbuds", "category": "Electronics", "cfScore": 0.942, "cbScore": 0.885},
+    {"id": "ITEM_4102", "name": "Anker USB-C 100W Fast Charging Cable", "category": "Accessories", "cfScore": 0.891, "cbScore": 0.920},
+    {"id": "ITEM_9921", "name": "Keychron Q1 Pro Wireless Mechanical Keyboard", "category": "Computers", "cfScore": 0.875, "cbScore": 0.760},
+]
+
 # ── Comparison data ──────────────────────────────────────────────────────────
 COMPARISON = [
     {"model": "MF-bias", "type": "CF", "rmse": 0.3727, "mae": 0.2869, "hr10": 0.6470, "ndcg10": 0.4368, "mrr": 0.3705},
@@ -277,3 +301,27 @@ def customer_info(customer_id: str):
         except Exception:
             continue
     raise HTTPException(status_code=404, detail=f"Customer '{customer_id}' not found")
+
+# ── Template (studio.tsx) data endpoints ──────────────────────────────────────
+@app.get("/benchmark")
+def benchmark():
+    return BENCHMARK_METRICS
+
+
+@app.get("/users")
+def users():
+    return SAMPLE_USERS
+
+
+@app.get("/catalog")
+def catalog():
+    return ITEM_CATALOG
+
+
+@app.get("/template")
+def template():
+    """Return the TSX template source for reference."""
+    p = BASE / "demo" / "studio.tsx"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="template not found")
+    return {"path": str(p), "size": p.stat().st_size}
