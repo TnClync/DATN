@@ -83,6 +83,14 @@ export default function App() {
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState('hr10');
   const [sortDirection, setSortDirection] = useState('desc');
+
+  // Live API recommend state
+  const [liveUserId, setLiveUserId] = useState(42);
+  const [liveModel, setLiveModel] = useState('late_fusion');
+  const [liveK, setLiveK] = useState(10);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveItems, setLiveItems] = useState([]);
+  const [liveError, setLiveError] = useState('');
   
   // Simulator state
   const [evalRatio, setEvalRatio] = useState(0.5); // 20%, 50%, 100%
@@ -150,6 +158,26 @@ export default function App() {
         return prev + 20;
       });
     }, 200);
+  };
+
+  const runLiveRecommend = async () => {
+    setLiveLoading(true);
+    setLiveError('');
+    setLiveItems([]);
+    try {
+      const res = await fetch('/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_idx: liveUserId, model: liveModel, k: liveK })
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      setLiveItems(data.items || []);
+    } catch (e) {
+      setLiveError(String(e));
+    } finally {
+      setLiveLoading(false);
+    }
   };
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
@@ -240,6 +268,18 @@ export default function App() {
               <Sliders className="h-4 w-4" />
               A/B Eval Simulator
             </button>
+
+            <button
+              onClick={() => setActiveTab('api')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'api'
+                  ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm'
+                  : `${textMuted} hover:text-cyan-500 hover:bg-slate-800/20`
+              }`}
+            >
+              <Activity className="h-4 w-4" />
+              Live API Recommend
+            </button>
           </nav>
         </div>
 
@@ -280,6 +320,7 @@ export default function App() {
               {activeTab === 'benchmark' && <><BarChart3 className="h-4 w-4 text-emerald-400"/> Production Model Benchmark & Leaderboard</>}
               {activeTab === 'staging' && <><Database className="h-4 w-4 text-indigo-400"/> Spark & PyArrow Memory Staging Inspector</>}
               {activeTab === 'simulator' && <><Sliders className="h-4 w-4 text-purple-400"/> A/B Testing & Evaluation Subsample Simulator</>}
+              {activeTab === 'api' && <><Activity className="h-4 w-4 text-rose-400"/> Live API Recommendations</>}
             </h2>
           </div>
 
@@ -742,6 +783,53 @@ export default function App() {
                   >
                     Run Subsample Eval
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: LIVE API RECOMMEND */}
+          {activeTab === 'api' && (
+            <div className="space-y-6 max-w-4xl">
+              <div className={`border rounded-xl p-6 space-y-4 ${bgCard}`}>
+                <h3 className={`text-base font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>Live API Recommendations</h3>
+                <p className={`text-xs ${textMuted}`}>Gọi trực tiếp FastAPI backend /recommend.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className={`text-xs font-semibold block mb-1 ${textMuted}`}>User idx</label>
+                    <input type="number" value={liveUserId} onChange={e => setLiveUserId(Number(e.target.value))}
+                      className={`w-full rounded-lg border px-3 py-2 text-sm ${inputBg}`} />
+                  </div>
+                  <div>
+                    <label className={`text-xs font-semibold block mb-1 ${textMuted}`}>Model</label>
+                    <select value={liveModel} onChange={e => setLiveModel(e.target.value)}
+                      className={`w-full rounded-lg border px-3 py-2 text-sm ${inputBg}`}>
+                      <option value="cf">cf</option>
+                      <option value="sbert">sbert</option>
+                      <option value="late_fusion">late_fusion</option>
+                      <option value="two_stage">two_stage</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={`text-xs font-semibold block mb-1 ${textMuted}`}>Top-K</label>
+                    <input type="number" value={liveK} onChange={e => setLiveK(Number(e.target.value))}
+                      className={`w-full rounded-lg border px-3 py-2 text-sm ${inputBg}`} />
+                  </div>
+                </div>
+                <button onClick={runLiveRecommend} disabled={liveLoading}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-md shadow-cyan-500/20 disabled:opacity-50">
+                  {liveLoading ? 'Loading...' : 'Get Recommendations'}
+                </button>
+                {liveError && <div className="text-rose-400 text-xs">{liveError}</div>}
+                <div className="space-y-2">
+                  {liveItems.map((it, idx) => (
+                    <div key={idx} className={`border rounded-lg px-3 py-2 text-sm font-mono ${bgCard}`}>
+                      #{idx + 1} — item {it}
+                    </div>
+                  ))}
+                  {!liveLoading && liveItems.length === 0 && !liveError && (
+                    <div className={`text-xs ${textMuted}`}>No results yet.</div>
+                  )}
                 </div>
               </div>
             </div>
