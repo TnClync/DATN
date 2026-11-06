@@ -1,0 +1,12 @@
+{
+  "id": "nguynteo/twotower-hybrid-2gpu",
+  "title": "twotower-hybrid-2gpu",
+  "code_file": "twotower-hybrid-2gpu.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_internet": "true",
+  "dataset_sources": ["nguynteo/lastone", "nguynteo/lastreview"],
+  "kernel_sources": ["nguynteo/sbert-content-2gpu-v2", "nguynteo/als-best-2gpu"]
+}

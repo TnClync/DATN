@@ -1,4 +1,8 @@
-from .hybrid_recommender import HybridRecommender
-from .serving_store import ServingStore
+from .base import BaseRecommender
+from .hybrid_baseline import HybridBaselineRecommender
+from .implicit_als import ImplicitALSRecommender
+from .late_fusion import LateFusionRecommender
+from .registry import get_model, list_models
 
-__all__ = ["HybridRecommender", "ServingStore"]
+__all__ = ["BaseRecommender", "HybridBaselineRecommender", "ImplicitALSRecommender",
+           "LateFusionRecommender", "get_model", "list_models"]

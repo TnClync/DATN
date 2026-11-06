@@ -1,58 +1,26 @@
+"""Spark session helper with a dedicated temp directory (laptop-friendly)."""
+import os
+import tempfile
+from pathlib import Path
+
 from pyspark.sql import SparkSession
 
-from config import (
-    APP_NAME,
-    MASTER,
-    SHUFFLE_PARTITIONS,
-    SPARK_DRIVER_MEMORY,
-    SPARK_EXECUTOR_MEMORY,
-    SPARK_MEMORY_FRACTION,
-    SPARK_MEMORY_STORAGE_FRACTION,
-    SPARK_CPU_CORES,
-    AQE_ENABLED,
-    AQE_COALESCE_PARTITIONS_ENABLED,
-)
 
-
-def create_spark() -> SparkSession:
-    builder = (
-        SparkSession.builder
-        .appName(APP_NAME)
-        .master(
-            MASTER if MASTER != "local[*]"
-            else f"local[{SPARK_CPU_CORES}]"
-        )
-        .config(
-            "spark.sql.shuffle.partitions",
-            str(SHUFFLE_PARTITIONS),
-        )
-        .config(
-            "spark.sql.adaptive.enabled",
-            str(AQE_ENABLED).lower(),
-        )
-        .config(
-            "spark.sql.adaptive.coalescePartitions.enabled",
-            str(AQE_COALESCE_PARTITIONS_ENABLED).lower(),
-        )
-        .config(
-            "spark.driver.memory",
-            SPARK_DRIVER_MEMORY,
-        )
-        .config(
-            "spark.executor.memory",
-            SPARK_EXECUTOR_MEMORY,
-        )
-        .config(
-            "spark.memory.fraction",
-            str(SPARK_MEMORY_FRACTION),
-        )
-        .config(
-            "spark.memory.storageFraction",
-            str(SPARK_MEMORY_STORAGE_FRACTION),
-        )
+def get_spark(app_name: str = "DATN-Recommender", temp_dir: str | None = None, cores: int = 6, memory_gb: int = 4):
+    """Create a SparkSession constrained to laptop resources and a temp dir."""
+    if temp_dir is None:
+        temp_dir = str(Path(tempfile.gettempdir()) / "datn_spark")
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+    os.environ["SPARK_LOCAL_DIRS"] = temp_dir
+    spark = (
+        SparkSession.builder.appName(app_name)
+        .master(f"local[{cores}]")
+        .config("spark.driver.memory", f"{memory_gb}g")
+        .config("spark.executor.memory", f"{memory_gb}g")
+        .config("spark.sql.shuffle.partitions", "8")
+        .config("spark.local.dir", temp_dir)
+        .config("spark.driver.extraJavaOptions", f"-Djava.io.tmpdir={temp_dir}")
+        .getOrCreate()
     )
-
-    spark = builder.getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
-
-    return spark
+    return spark, temp_dir

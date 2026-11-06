@@ -1,171 +1,89 @@
-# Đồ Án Tốt Nghiệp: Xây Dựng Mô Hình Lai Ghép Cho Hệ Thống Khuyến Nghị Sản Phẩm (Amazon)
+# Đồ án tốt nghiệp: Hệ thống gợi ý lai ghép (Hybrid Recommender System)
 
-Hệ thống khuyến nghị sản phẩm lai ghép (Hybrid Recommender System) kết hợp:
+## Tổng quan
+Hệ thống gợi ý sản phẩm lai ghép kết hợp Collaborative Filtering (CF) và Content-Based (CB) trên dữ liệu Amazon (LastOne + LastReview).
 
-1. **Collaborative Filtering (CF)**: điểm phổ biến của sản phẩm từ lịch sử tương tác
-   (có thể nâng cấp lên ALS / BPR-MF khi có latent factors).
-2. **Content-Based Filtering (CB)**: TF-IDF trên mô tả, thương hiệu, ngành hàng.
-3. **Hybrid Fusion**: `hybrid_score = α·CF + (1−α)·CB`, xử lý cold-start và
-   tăng độ chính xác Top-K.
+## Models đã train
 
----
-
-## 📂 Cấu Trúc Thư Mục
-
-```text
-DATN/
-├── app.py                          # Web demo Streamlit (tự chạy khi nhập user)
-├── main.py                         # CLI demo nhanh
-├── test.py                         # Test serving/hybrid/content-based
-├── config.py                       # Cấu hình đường dẫn & tham số
-├── pyproject.toml                  # Dependencies (uv / pip)
-├── .gitignore
-│
-├── data/
-│   └── demo_user_profile.json      # 5 hồ sơ người dùng mẫu
-│
-├── docs/                           # Báo cáo & theo dõi tiến độ
-│   ├── Đồ án.docx
-│   └── Đồ án progress.xlsx
-│
-├── models/
-│   ├── als/                        # ALS data: mappings, train/test/validation
-│   ├── bpr_mf/                     # BPR-MF checkpoint & dữ liệu train
-│   ├── content_based/              # TF-IDF model + item vectors
-│   ├── hybrid/                     # Cấu hình hybrid (hybrid_config.json)
-│   └── serving/                    # ⚡ Cache tối ưu RAM (sinh ra, không commit)
-│
-├── outputs/                        # Kết quả demo / inference
-│   ├── jev_electronics_recommendations.csv
-│   ├── jev_scored_products.csv
-│   └── bpr_mf/                     # Top-K xuất từ BPR-MF
-│
-├── scripts/
-│   ├── build_serving_cache.py      # ⭐ Build cache 1 lần cho app
-│   ├── kaggle_download.py          # Tải output từ Kaggle
-│   ├── rating_distribution.py      # EDA phân bố đánh giá
-│   └── test_content_similar.py     # Kiểm tra cosine similarity TF-IDF
-│
-└── src/
-    ├── __init__.py
-    ├── spark_session.py            # Khởi tạo Spark Session
-    ├── recommender_cf.py           # CF engine (ALS qua Spark)
-    ├── split_interaction.py        # Chia train/validation/test
-    ├── mapping.py                  # Mapping reviewerID / ASIN → index
-    ├── train.py                    # Train ALS
-    ├── Inference.py                # Inference qua JevOS
-    ├── MostPopRec.py               # Baseline popularity
-    └── models/
-        ├── __init__.py
-        ├── bpr_recommender.py      # BPR-MF recommender (checkpoint Kaggle)
-        ├── hybrid_recommender.py   # ⭐ API gợi ý lai ghép
-        ├── serving_store.py        # ⭐ Cache + truy vấn tiết kiệm RAM
-        └── train_content_tfidf.py  # Train TF-IDF content-based
-```
-
-> `models/als`, `models/content_based`, `models/bpr_mf` và `models/serving`
-> được đưa vào `.gitignore` vì dung lượng lớn.
-
----
-
-## 🚀 Hướng Dẫn Chạy
-
-### 0. Cài dependencies
-
-```bash
-uv sync
-# hoặc
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-```
-
-Các thư viện chính (khai báo trong `pyproject.toml`):
-
-- `numpy`, `pandas`, `pyarrow` — xử lý dữ liệu
-- `pyspark` — train ALS / TF-IDF
-- `torch` — BPR-MF & Hybrid
-- `streamlit` — web demo
-- `requests` — gọi JevOS (Inference)
-- `kaggle` — tải output từ Kaggle
-
-### 1. Build serving cache (chỉ một lần)
-
-Cache giúp app mở nhanh và không ngốn RAM. Cần chạy lại khi dữ liệu model thay đổi.
-
-```bash
-python scripts/build_serving_cache.py
-# build lại từ đầu:
-python scripts/build_serving_cache.py --force
-```
-
-Kết quả nằm trong `models/serving/` (khoảng 3.5GB, chủ yếu là TF-IDF
-memory-map; metadata dùng SQLite để tra cứu Top-K mà không nạp vào RAM).
-
-| File | Vai trò | Cách dùng |
+### Collaborative Filtering (CF)
+| Model | File | Metrics |
 |---|---|---|
-| `catalog_index.npz` | popularity, domain, item norm | nạp vào RAM (~88MB) |
-| `catalog_meta.sqlite` | asin/title/brand/category/price | chỉ query Top-K |
-| `tfidf_*.{f32,i32}` + `tfidf_indptr.npy` | TF-IDF CSR | memory-map |
-| `users_sorted.s20` + `users_idx.i32` | reviewerID → user_idx | binary search trên memmap |
-| `seen_indptr.npy` + `seen_items.i32` | item đã tương tác | memory-map |
+| MF-bias | `models/mf_bias/` | RMSE 0.3727, MAE 0.2869 |
+| ALS (PyTorch) | `models/als_torch/` | RMSE 3.8359, HR@10 0.9725 |
+| BPR-MF | N/A (lost) | HR@10 0.0184 |
 
+### Content-Based (CB)
+| Model | File | Artifact |
+|---|---|---|
+| SBERT (all-MiniLM-L6-v2) | `models/sbert/` | 424361 items × 384 dim |
 
-### 2. Chạy web demo
+### Hybrid (Deep)
+| Model | File | Size | Metrics |
+|---|---|---|---|
+| Gated Hybrid | `models/gated_hybrid/` | 1.6 GB | user/item emb + content gate + MLP |
+| DCN-v2 | `models/dcnv2/` | 2.7 GB | RMSE 0.4445, MAE 0.2536, HR@10 0.2632 |
+| TwoTower | `models/twotower/` | 2.7 GB | RMSE 0.4385, MAE 0.2491, HR@10 0.1974 |
+| ResidualCascade | `models/residual_cascade/` | 2.8 GB | train RMSE 0.2647, HR@10 0.1632 |
+| AutoInt | `models/autoint/` | 2.7 GB | RMSE 0.4629, MAE 0.2455, HR@10 0.2289 |
+| Deep Fusion MLP | `models/deep_fusion/` | 1.1 MB | Frozen features MLP |
 
-```bash
-streamlit run app.py
+### Hybrid (Linear)
+| Model | HR@10 | NDCG@10 | MRR |
+|---|---|---|---|
+| LateFusion (α=0.5) | 0.6515 | 0.4324 | 0.3633 |
+| LateFusion (α=0.7) | 0.6515 | 0.4321 | 0.3631 |
+| EarlyFusion | 0.6470 | 0.4346 | 0.3678 |
+
+## Cấu trúc thư mục
+```
+DATN/
+├── api.py                          # FastAPI backend (primary web interface)
+├── src/
+│   ├── models/                     # Modular model classes (BaseRecommender subclasses)
+│   │   ├── baseline (PopularityRecommender)
+│   │   └── recommended (ImplicitALSRecommender)
+│   └── spark_session.py            # Spark session with temp_dir (laptop-friendly)
+├── scripts/
+│   ├── demo_inference.py           # CLI demo
+│   ├── train_implicit.py           # CPU training (<=4GB RAM, 6 cores)
+│   ├── kaggle_train_onefile.py     # Single-file Kaggle GPU training
+│   └── push_model_to_kaggle.py     # Push model to Kaggle
+├── demo/studio.tsx                 # React/TSX demo template
+├── models/                         # Trained models (baseline/, recommended/, ...)
+├── docs/                           # Documentation + comparison + report
+└── data/                           # Train/test/validation parquet
 ```
 
-Mở `http://localhost:8501`.
+## Baseline vs Recommended
+- **Baseline**: `PopularityRecommender` (global popularity, implicit feedback) — fast, CPU-only.
+- **Recommended**: `ImplicitALSRecommender` (implicit ALS) — better personalization, CPU/GPU.
 
-**Điểm mới:** không cần bấm nút “Tạo gợi ý”. Khi bạn chọn tài khoản mẫu hoặc
-nhập `reviewerID` (rồi nhấn Enter), hệ thống **tự động chạy gợi ý**. Kết quả
-cũng tự cập nhật khi đổi Top-K, ngành hàng hoặc α.
+Use model name `baseline` or `recommended` in `/recommend` endpoint.
 
-### 3. Chạy CLI
-
+## Chạy
 ```bash
-# Hybrid (mặc định)
-python main.py --model hybrid --user A1IPEJDMQNXJYF --top_k 5
+# API server (web UI tại http://localhost:8000)
+uv run uvicorn api:app --host 0.0.0.0 --port 8000
 
-# Tùy chỉnh trọng số và ngành hàng
-python main.py --model hybrid --user A1IPEJDMQNXJYF --alpha 0.7 --domain Electronics
+# CLI demo
+uv run python scripts/demo_inference.py --user_idx 3 --top_k 10
 ```
 
----
+## API Endpoints
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/` | Trang chủ (HTML) |
+| GET | `/health` | Health check |
+| GET | `/models` | List available models |
+| POST | `/recommend` | Gợi ý (customer_id, model, top_k, alpha) |
+| GET | `/compare` | Bảng so sánh 14 model |
+| GET | `/customer/{id}` | Thông tin customer |
 
-## ⚡ Vì Sao App Không Còn Lag?
+## Datasets
+- `nguynteo/lastone` — interactions (user_idx, item_idx, rating, ...)
+- `nguynteo/lastreview` — review content (review_content per item_idx)
 
-Bản cũ mỗi lần mở app đều:
-
-- đọc **3.7M item vectors** (1.2GB Parquet) vào pandas,
-- đọc **45.6M interactions** (260MB Parquet) vào pandas và tạo `set` cho từng user,
-- chuyển từng vector TF-IDF 200.000 chiều thành dense array bằng vòng lặp Python.
-
-Trên laptop 8GB RAM, cách đó ngốn nhiều GB và gây swap → treo máy.
-
-Bản mới:
-
-- **Lazy load**: chỉ nạp model sau khi có `reviewerID`.
-- **Serving cache**: TF-IDF lưu dạng CSR và **memory-map**; chỉ đọc đúng vài
-  trang cần thiết.
-- **Candidate pool**: chỉ chấm Content-Based cho ~500 ứng viên phổ biến nhất
-  thay vì toàn bộ 3.7M sản phẩm.
-- **Tra cứu user**: binary search trên mảng `reviewerID` đã sort (log N), không
-  quét file 226MB mỗi lần.
-- **Cache kết quả** của Streamlit: đổi tham số nhỏ không tính lại từ đầu.
-
----
-
-## 🎯 Quy Trình Train Trên Kaggle / Colab
-
-1. Train mô hình Hybrid trên Kaggle Notebook (GPU T4) hoặc Colab.
-2. Xuất checkpoint / trọng số về máy.
-3. Đặt file vào đúng thư mục:
-   - Hybrid weights: `models/hybrid/hybrid_model.pt`
-   - ALS factors: `models/als/userFactors/`, `models/als/itemFactors/`
-4. Nếu dữ liệu thay đổi, build lại cache:
-   ```bash
-   python scripts/build_serving_cache.py --force
-   ```
-5. Mở `streamlit run app.py` — hệ thống tự nhận diện và chạy.
+## Báo cáo
+- `docs/Đồ án.docx` — Báo cáo đầy đủ
+- `docs/model_comparison.md` — So sánh chi tiết các model
+- `docs/results/all_trained_models_eval.json` — Metrics JSON

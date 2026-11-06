@@ -1,0 +1,178 @@
+{
+  "description": "T\u1ed5ng h\u1ee3p t\u1ea5t c\u1ea3 model \u0111\u00e3 train th\u00e0nh c\u00f4ng (c\u00f3 file th\u1ef1c)",
+  "models": [
+    {
+      "name": "MF-bias",
+      "type": "CF",
+      "train": "Kaggle (lastone)",
+      "file": "models/mf_bias/mf_bias_state.pt",
+      "size": "209MB",
+      "rmse": 0.3727,
+      "mae": 0.2869,
+      "hr10": 0.647,
+      "ndcg10": 0.4368,
+      "mrr": 0.3705
+    },
+    {
+      "name": "ALS (PyTorch)",
+      "type": "CF",
+      "train": "Kaggle (lastone)",
+      "file": "models/als_torch/ (meta only)",
+      "size": "~1MB",
+      "rmse": 3.8359,
+      "mae": 3.8165,
+      "hr10": 0.9725,
+      "ndcg10": 0.771,
+      "mrr": 0.7062
+    },
+    {
+      "name": "BPR-MF",
+      "type": "CF",
+      "train": "Kaggle (lastone)",
+      "file": "N/A (checkpoint lost)",
+      "size": "N/A",
+      "rmse": null,
+      "mae": null,
+      "hr10": 0.0184,
+      "ndcg10": 0.0104,
+      "mrr": null
+    },
+    {
+      "name": "SBERT Content",
+      "type": "CB",
+      "train": "Kaggle (lastreview)",
+      "file": "models/sbert/sbert_item_embeddings.npy",
+      "size": "622MB",
+      "rmse": null,
+      "mae": null,
+      "hr10": 0.0,
+      "ndcg10": 0.0,
+      "mrr": 0.0
+    },
+    {
+      "name": "LateFusion (\u03b1=0.5)",
+      "type": "Hybrid (Linear)",
+      "train": "Kaggle (fusion)",
+      "file": "fusion_eval_full.json",
+      "size": "N/A",
+      "rmse": null,
+      "mae": null,
+      "hr10": 0.6515,
+      "ndcg10": 0.4324,
+      "mrr": 0.3633
+    },
+    {
+      "name": "LateFusion (\u03b1=0.7)",
+      "type": "Hybrid (Linear)",
+      "train": "Kaggle (fusion)",
+      "file": "fusion_eval_full.json",
+      "size": "N/A",
+      "rmse": null,
+      "mae": null,
+      "hr10": 0.6515,
+      "ndcg10": 0.4321,
+      "mrr": 0.3631
+    },
+    {
+      "name": "EarlyFusion",
+      "type": "Hybrid (Linear)",
+      "train": "Kaggle (fusion)",
+      "file": "fusion_eval_full.json",
+      "size": "N/A",
+      "rmse": null,
+      "mae": null,
+      "hr10": 0.647,
+      "ndcg10": 0.4346,
+      "mrr": 0.3678
+    },
+    {
+      "name": "Gated Hybrid",
+      "type": "Hybrid (Deep)",
+      "train": "Local",
+      "file": "models/gated_hybrid/gated_hybrid_recommender.pth",
+      "size": "1.6GB",
+      "rmse": null,
+      "mae": null,
+      "hr10": null,
+      "ndcg10": null,
+      "mrr": null
+    },
+    {
+      "name": "Deep Fusion MLP",
+      "type": "Hybrid (Deep)",
+      "train": "Kaggle (fusion)",
+      "file": "models/deep_fusion/deep_fusion_mlp.pt",
+      "size": "1.1MB",
+      "rmse": null,
+      "mae": null,
+      "hr10": null,
+      "ndcg10": null,
+      "mrr": null
+    },
+    {
+      "name": "DCN-v2",
+      "type": "Hybrid (Deep)",
+      "train": "Kaggle",
+      "file": "models/dcnv2/dcnv2_state.pt",
+      "size": "2.7GB",
+      "rmse": 0.4445,
+      "mae": 0.2536,
+      "hr10": 0.2632,
+      "ndcg10": 0.1193,
+      "mrr": 0.1018
+    },
+    {
+      "name": "TwoTower",
+      "type": "Hybrid (Deep)",
+      "train": "Kaggle",
+      "file": "models/twotower/twotower_state.pt",
+      "size": "2.7GB",
+      "rmse": 0.4385,
+      "mae": 0.2491,
+      "hr10": 0.1974,
+      "ndcg10": 0.0936,
+      "mrr": 0.0902
+    },
+    {
+      "name": "ResidualCascade",
+      "type": "Hybrid (Deep)",
+      "train": "Kaggle",
+      "file": "models/residual_cascade/residual_cascade_state.pt",
+      "size": "2.8GB",
+      "rmse": null,
+      "mae": null,
+      "hr10": 0.1632,
+      "ndcg10": 0.0863,
+      "mrr": 0.0893
+    },
+    {
+      "name": "AutoInt",
+      "type": "Hybrid (Deep)",
+      "train": "Kaggle",
+      "file": "models/autoint/autoint_state.pt",
+      "size": "2.7GB",
+      "rmse": 0.4629,
+      "mae": 0.2455,
+      "hr10": null,
+      "ndcg10": null,
+      "mrr": null
+    }
+  ],
+  "best_rating": {
+    "model": "MF-bias",
+    "rmse": 0.3727,
+    "mae": 0.2869
+  },
+  "best_ranking": {
+    "model": "DCN-v2",
+    "hr10": 0.2632,
+    "ndcg10": 0.1193,
+    "mrr": 0.1018
+  },
+  "best_linear_hybrid": {
+    "model": "LateFusion (a=0.5)",
+    "hr10": 0.6515,
+    "ndcg10": 0.4324,
+    "mrr": 0.3633
+  }
+}

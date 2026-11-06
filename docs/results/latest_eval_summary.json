@@ -1,0 +1,118 @@
+{
+  "evaluation_date": "2026-11-05",
+  "protocol": "2000 users, 1 positive + 99 negatives, HR@5/10/20, NDCG@5/10/20, MRR",
+  "models": {
+    "MF-bias": {
+      "type": "CF",
+      "source": "Kaggle (mf-bias-2gpu)",
+      "metrics": {"rmse": 0.3727, "mae": 0.2869, "hr10": 0.6470, "ndcg10": 0.4368, "mrr": 0.3705}
+    },
+    "ALS (PyTorch)": {
+      "type": "CF",
+      "source": "Kaggle (als-best-2gpu)",
+      "metrics": {"rmse": 3.8359, "mae": 3.8165, "hr10": 0.9725, "ndcg10": 0.7710, "mrr": 0.7062}
+    },
+    "BPR-MF": {
+      "type": "CF",
+      "source": "Kaggle",
+      "metrics": {"hr10": 0.0184, "ndcg10": 0.0104}
+    },
+    "SBERT Content": {
+      "type": "CB",
+      "source": "Kaggle (sbert-content-2gpu-v2)",
+      "metrics": {"hr10": 0.0, "ndcg10": 0.0, "mrr": 0.0}
+    },
+    "Popularity": {
+      "type": "Baseline",
+      "source": "Kaggle (fusion-eval-2gpu)",
+      "metrics": {"hr5": 0.7316, "hr10": 0.6560, "hr20": null, "ndcg5": 0.6023, "ndcg10": 0.4680, "ndcg20": null, "mrr": 0.4094}
+    },
+    "LateFusion (a=0.5)": {
+      "type": "Hybrid (Linear)",
+      "source": "Kaggle (fusion-eval-2gpu)",
+      "metrics": {"hr10": 0.6515, "ndcg10": 0.4324, "mrr": 0.3633}
+    },
+    "LateFusion (a=0.7)": {
+      "type": "Hybrid (Linear)",
+      "source": "Kaggle (fusion-eval-2gpu)",
+      "metrics": {"hr10": 0.6515, "ndcg10": 0.4321, "mrr": 0.3631}
+    },
+    "EarlyFusion": {
+      "type": "Hybrid (Linear)",
+      "source": "Kaggle (fusion-eval-2gpu)",
+      "metrics": {"hr10": 0.6470, "ndcg10": 0.4346, "mrr": 0.3678}
+    },
+    "Gated Hybrid": {
+      "type": "Hybrid (Deep)",
+      "source": "Local",
+      "metrics": {"hr5": 0.2251, "hr10": 0.3298, "hr20": 0.3927, "ndcg5": 0.1485, "ndcg10": 0.1815, "ndcg20": 0.1974, "mrr": 0.1500}
+    },
+    "DCN-v2": {
+      "type": "Hybrid (Deep)",
+      "source": "Kaggle (dcn-v2-hybrid-recommender-gpu-v5-fixed-oom)",
+      "metrics": {"train_rmse": 0.1374, "test_rmse": 0.4445, "test_mae": 0.2536, "hr5": 0.1500, "hr10": 0.2632, "hr20": null, "ndcg5": 0.0832, "ndcg10": 0.1193, "ndcg20": null, "mrr": 0.1018}
+    },
+    "TwoTower": {
+      "type": "Hybrid (Deep)",
+      "source": "Kaggle (twotower-retrieval-gpu-v4-fixed-oom)",
+      "metrics": {"train_rmse": 0.2553, "test_rmse": 0.4385, "test_mae": 0.2491, "hr5": 0.1026, "hr10": 0.1974, "hr20": null, "ndcg5": 0.0632, "ndcg10": 0.0936, "ndcg20": null, "mrr": 0.0902}
+    },
+    "ResidualCascade": {
+      "type": "Hybrid (Deep)",
+      "source": "Kaggle (residualcascade-hybrid-recommender-gpu-v4)",
+      "metrics": {"train_rmse": 0.2647, "hr5": 0.1000, "hr10": 0.1632, "hr20": null, "ndcg5": 0.0655, "ndcg10": 0.0863, "ndcg20": null, "mrr": 0.0893}
+    },
+    "AutoInt": {
+      "type": "Hybrid (Deep)",
+      "source": "Kaggle (autoint-self-attention-hybrid-2gpu)",
+      "metrics": {"train_rmse": 0.1801, "test_rmse": 0.4629, "test_mae": 0.2455, "hr5": 0.1263, "hr10": 0.2289, "hr20": null, "ndcg5": 0.0760, "ndcg10": 0.1087, "ndcg20": null, "mrr": 0.1005}
+    },
+    "Deep Fusion MLP": {
+      "type": "Hybrid (Deep)",
+      "source": "Kaggle (fusion-eval-2gpu)",
+      "metrics": {}
+    },
+    "LateFusion(SBERT+Gated,0.5)": {
+      "type": "Hybrid (Local)",
+      "source": "Local eval",
+      "metrics": {"hr5": 0.4241, "hr10": 0.5602, "hr20": 0.6335, "ndcg5": 0.3134, "ndcg10": 0.3563, "ndcg20": 0.3748, "mrr": 0.3046, "n": 191}
+    },
+    "LateFusion(SBERT+Gated,0.7)": {
+      "type": "Hybrid (Local)",
+      "source": "Local eval",
+      "metrics": {"hr5": 0.4869, "hr10": 0.5602, "hr20": 0.6335, "ndcg5": 0.4048, "ndcg10": 0.4283, "ndcg20": 0.4468, "mrr": 0.3974, "n": 191}
+    },
+    "EarlyFusion(SBERT+Gated)": {
+      "type": "Hybrid (Local)",
+      "source": "Local eval",
+      "metrics": {"hr5": 0.4241, "hr10": 0.5550, "hr20": 0.6335, "ndcg5": 0.3213, "ndcg10": 0.3622, "ndcg20": 0.3821, "mrr": 0.3145, "n": 191}
+    },
+    "SBERT-Only (local)": {
+      "type": "CB (Local)",
+      "source": "Local eval",
+      "metrics": {"hr5": 0.5026, "hr10": 0.5602, "hr20": 0.5654, "ndcg5": 0.4575, "ndcg10": 0.4757, "ndcg20": 0.4770, "mrr": 0.4541, "n": 191}
+    },
+    "Gated-Only (local)": {
+      "type": "Hybrid (Local)",
+      "source": "Local eval",
+      "metrics": {"hr5": 0.2251, "hr10": 0.3298, "hr20": 0.3927, "ndcg5": 0.1485, "ndcg10": 0.1815, "ndcg20": 0.1974, "mrr": 0.1500, "n": 191}
+    },
+    "AutoInt (local)": {
+      "type": "Hybrid (Local)",
+      "source": "Local eval (10K samples)",
+      "metrics": {"hr10": 0.5450, "ndcg10": 0.3032, "mrr": 0.2293, "n": 200}
+    },
+    "NeuMF (local)": {
+      "type": "Hybrid (Local)",
+      "source": "Local eval (10K samples)",
+      "metrics": {"hr10": 0.1200, "ndcg10": 0.0539, "mrr": 0.0344, "n": 200}
+    }
+  },
+  "summary": {
+    "best_rating": {"model": "MF-bias", "rmse": 0.3727, "mae": 0.2869},
+    "best_ranking_full_test": {"model": "ALS", "hr10": 0.9725, "ndcg10": 0.7710, "mrr": 0.7062},
+    "best_linear_hybrid": {"model": "LateFusion (a=0.5)", "hr10": 0.6515, "ndcg10": 0.4324, "mrr": 0.3633},
+    "best_deep_hybrid": {"model": "DCN-v2", "hr10": 0.2632, "ndcg10": 0.1193, "mrr": 0.1018},
+    "best_local_hybrid": {"model": "SBERT-Only", "hr10": 0.5602, "ndcg10": 0.4757, "mrr": 0.4541}
+  }
+}

@@ -33,3 +33,13 @@ models/content_based/
 # Kết quả sinh ra khi chạy demo
 outputs/*.csv
 outputs/bpr_mf/
+
+# Large artifacts / generated
+models/
+data/
+graphify-out/
+kaggle_token.txt
+*.pt
+*.pth
+*.npy
+*.npz
