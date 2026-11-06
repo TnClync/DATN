@@ -1,7 +1,11 @@
-from fastapi.testclient import TestClient
-import api
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-client = TestClient(api.app)
+from fastapi.testclient import TestClient
+from src.api.main import app
+
+client = TestClient(app)
 
 
 def test_health():
@@ -13,20 +17,21 @@ def test_health():
 def test_models():
     r = client.get("/models")
     assert r.status_code == 200
-    assert "baseline" in r.json()["models"]
+    assert "late_fusion" in r.json()["models"]
 
 
-def test_recommend_invalid_model():
-    r = client.post("/recommend", json={"customer_id": "x", "model": "nope"})
-    assert r.status_code == 404
+def test_recommend():
+    r = client.post("/recommend", json={"user_idx": 5, "model": "cf", "k": 5})
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data["items"], list)
 
 
-def test_recommend_empty_customer():
-    r = client.post("/recommend", json={"customer_id": "  ", "model": "baseline"})
+def test_recommend_invalid():
+    r = client.post("/recommend", json={"user_idx": -1, "k": 5})
     assert r.status_code == 400
 
 
-def test_benchmark():
-    r = client.get("/benchmark")
+def test_items():
+    r = client.get("/items/10")
     assert r.status_code == 200
-    assert isinstance(r.json(), list)

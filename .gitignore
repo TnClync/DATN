@@ -38,8 +38,13 @@ outputs/bpr_mf/
 models/
 data/
 graphify-out/
+artifacts/
 kaggle_token.txt
 *.pt
 *.pth
 *.npy
 *.npz
+# Frontend
+frontend/node_modules/
+node_modules/
+app/frontend/node_modules/

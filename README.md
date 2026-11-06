@@ -1,92 +1,68 @@
-# Đồ án tốt nghiệp: Hệ thống gợi ý lai ghép (Hybrid Recommender System)
+# Deep Hybrid Recommender System
 
-## Tổng quan
-Hệ thống gợi ý sản phẩm lai ghép kết hợp Collaborative Filtering (CF) và Content-Based (CB) trên dữ liệu Amazon (LastOne + LastReview).
+Hệ thống gợi ý lai sâu (Deep Hybrid) cho dữ liệu Amazon Reviews (~45.6M tương tác implicit, 22M users × 3.7M items). Train trên Kaggle (GPU/CPU), deploy local 8GB RAM.
 
-## Models đã train
+## Kiến trúc
 
-### Collaborative Filtering (CF)
-| Model | File | Metrics |
-|---|---|---|
-| MF-bias | `models/mf_bias/` | RMSE 0.3727, MAE 0.2869 |
-| ALS (PyTorch) | `models/als_torch/` | RMSE 3.8359, HR@10 0.9725 |
-| BPR-MF | N/A (lost) | HR@10 0.0184 |
+- **Baseline**: Late Fusion (ALS/BPR từ `implicit` + SBERT + FAISS)
+- **1. Two-Stage Retrieval + Cross-Encoder Reranker** (bge-reranker-v2-m3)
+- **2. Light Gated Late Fusion** (học alpha động)
+- **3. Deep Early Fusion** (Gated / Cross Network nhỏ)
 
-### Content-Based (CB)
-| Model | File | Artifact |
-|---|---|---|
-| SBERT (all-MiniLM-L6-v2) | `models/sbert/` | 424361 items × 384 dim |
+## Cấu trúc
 
-### Hybrid (Deep)
-| Model | File | Size | Metrics |
-|---|---|---|---|
-| Gated Hybrid | `models/gated_hybrid/` | 1.6 GB | user/item emb + content gate + MLP |
-| DCN-v2 | `models/dcnv2/` | 2.7 GB | RMSE 0.4445, MAE 0.2536, HR@10 0.2632 |
-| TwoTower | `models/twotower/` | 2.7 GB | RMSE 0.4385, MAE 0.2491, HR@10 0.1974 |
-| ResidualCascade | `models/residual_cascade/` | 2.8 GB | train RMSE 0.2647, HR@10 0.1632 |
-| AutoInt | `models/autoint/` | 2.7 GB | RMSE 0.4629, MAE 0.2455, HR@10 0.2289 |
-| Deep Fusion MLP | `models/deep_fusion/` | 1.1 MB | Frozen features MLP |
-
-### Hybrid (Linear)
-| Model | HR@10 | NDCG@10 | MRR |
-|---|---|---|---|
-| LateFusion (α=0.5) | 0.6515 | 0.4324 | 0.3633 |
-| LateFusion (α=0.7) | 0.6515 | 0.4321 | 0.3631 |
-| EarlyFusion | 0.6470 | 0.4346 | 0.3678 |
-
-## Cấu trúc thư mục
 ```
-DATN/
-├── api.py                          # FastAPI backend (primary web interface)
-├── src/
-│   ├── models/                     # Modular model classes (BaseRecommender subclasses)
-│   │   ├── baseline (PopularityRecommender)
-│   │   └── recommended (ImplicitALSRecommender)
-│   └── spark_session.py            # Spark session with temp_dir (laptop-friendly)
-├── scripts/
-│   ├── demo_inference.py           # CLI demo
-│   ├── train_implicit.py           # CPU training (<=4GB RAM, 6 cores)
-│   ├── kaggle_train_onefile.py     # Single-file Kaggle GPU training
-│   └── push_model_to_kaggle.py     # Push model to Kaggle
-├── demo/studio.tsx                 # React/TSX demo template
-├── models/                         # Trained models (baseline/, recommended/, ...)
-├── docs/                           # Documentation + comparison + report
-└── data/                           # Train/test/validation parquet
+src/
+  config.py            # đường dẫn & hằng số
+  data.py              # load parquet, build CSR matrix
+  metrics.py           # HR@K, NDCG@K, MRR
+  models/              # cf, sbert, late_fusion, two_stage, gated_fusion, early_fusion
+  serving/pipeline.py  # inference 8GB-friendly
+  api/main.py          # FastAPI
+scripts/
+  01_train_cf.py
+  02_build_sbert.py
+  03_baseline_late_fusion_eval.py
+  04_two_stage_rerank_eval.py
+  05_train_gated_fusion.py
+  06_train_deep_early_fusion.py
+app/frontend/          # React UI (Vite)
+tests/
 ```
 
-## Baseline vs Recommended
-- **Baseline**: `PopularityRecommender` (global popularity, implicit feedback) — fast, CPU-only.
-- **Recommended**: `ImplicitALSRecommender` (implicit ALS) — better personalization, CPU/GPU.
+## Chạy trên Kaggle
 
-Use model name `baseline` or `recommended` in `/recommend` endpoint.
-
-## Chạy
 ```bash
-# API server (web UI tại http://localhost:8000)
-uv run uvicorn api:app --host 0.0.0.0 --port 8000
+# 1. Train CF
+python scripts/01_train_cf.py --model als --factors 64 --iters 15
+python scripts/01_train_cf.py --model bpr --factors 64 --iters 30
 
-# Tests
-uv run pytest tests/ -q
+# 2. Build SBERT + FAISS
+python scripts/02_build_sbert.py
 
-# CLI demo
-uv run python scripts/demo_inference.py --user_idx 3 --top_k 10
+# 3-6. Eval / train fusion
+python scripts/03_baseline_late_fusion_eval.py --users 500
+python scripts/04_two_stage_rerank_eval.py --users 200
+python scripts/05_train_gated_fusion.py --epochs 5
+python scripts/06_train_deep_early_fusion.py --epochs 3
 ```
 
-## API Endpoints
-| Method | Path | Mô tả |
-|---|---|---|
-| GET | `/` | Trang chủ (HTML) |
-| GET | `/health` | Health check |
-| GET | `/models` | List available models |
-| POST | `/recommend` | Gợi ý (customer_id, model, top_k, alpha) |
-| GET | `/compare` | Bảng so sánh 14 model |
-| GET | `/customer/{id}` | Thông tin customer |
+## Deploy local (8GB)
 
-## Datasets
-- `nguynteo/lastone` — interactions (user_idx, item_idx, rating, ...)
-- `nguynteo/lastreview` — review content (review_content per item_idx)
+```bash
+pip install -r requirements.txt  # python 3.11
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+# frontend: cd app/frontend && npm run build
+```
 
-## Báo cáo
-- `docs/Đồ án.docx` — Báo cáo đầy đủ
-- `docs/model_comparison.md` — So sánh chi tiết các model
-- `docs/results/all_trained_models_eval.json` — Metrics JSON
+Mở http://localhost:8000
+
+## Metrics
+
+HR@5/10/20, NDCG@5/10/20, MRR (src/metrics.py).
+
+## Tối ưu bộ nhớ
+
+- Factors float16 + `mmap_mode="r"` cho user factors.
+- Two-stage retrieval (không score toàn bộ 3.7M items).
+- Cross-encoder chỉ rerank top candidates.
