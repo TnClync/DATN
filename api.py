@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import time
 import json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,6 +41,14 @@ app.add_middleware(
 _DIST = BASE / "frontend" / "dist"
 if _DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="assets")
+
+
+@app.middleware("http")
+async def add_timing(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    response.headers["X-Response-Time"] = f"{(time.perf_counter() - start) * 1000:.1f}ms"
+    return response
 
 # ── Lazy model loading (load on first request) ───────────────────────────────
 _models = {}
@@ -151,20 +159,31 @@ def models():
 def recommend(req: RecommendRequest):
     if req.model not in list_models():
         raise HTTPException(status_code=404, detail=f"Model '{req.model}' not found. Available: {list_models()}")
+    if not req.customer_id.strip():
+        raise HTTPException(status_code=400, detail="customer_id is required")
+    if req.top_k < 1 or req.top_k > 100:
+        raise HTTPException(status_code=400, detail="top_k must be between 1 and 100")
+    if req.alpha < 0 or req.alpha > 1:
+        raise HTTPException(status_code=400, detail="alpha must be between 0 and 1")
     try:
         model = get_loaded_model(req.model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load model: {e}")
-    res, err = model.recommend_by_customer(req.customer_id, top_k=req.top_k, alpha=req.alpha)
+    try:
+        res, err = model.recommend_by_customer(req.customer_id, top_k=req.top_k, alpha=req.alpha)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recommendation failed: {e}")
     if err:
         raise HTTPException(status_code=404, detail=err)
     info = model.get_customer_info(req.customer_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"Customer '{req.customer_id}' not found")
     return RecommendResponse(
         customer_id=req.customer_id,
         user_idx=info["user_idx"],
         n_interactions=info["n_interactions"],
         model=req.model,
-        recommendations=res,
+        recommendations=res or [],
     )
 
 
@@ -208,3 +227,12 @@ def template():
     if not p.exists():
         raise HTTPException(status_code=404, detail="template not found")
     return {"path": str(p), "size": p.stat().st_size}
+
+
+@app.get("/metrics")
+def metrics():
+    return {
+        "models_available": list_models(),
+        "models_loaded": list(_models.keys()),
+        "device": "cpu",
+    }

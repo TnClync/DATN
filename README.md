@@ -65,6 +65,9 @@ Use model name `baseline` or `recommended` in `/recommend` endpoint.
 # API server (web UI tại http://localhost:8000)
 uv run uvicorn api:app --host 0.0.0.0 --port 8000
 
+# Tests
+uv run pytest tests/ -q
+
 # CLI demo
 uv run python scripts/demo_inference.py --user_idx 3 --top_k 10
 ```
