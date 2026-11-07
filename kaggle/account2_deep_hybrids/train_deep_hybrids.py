@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Kaggle Account 2 (minhteonguyn): Deep Hybrid Recommenders (GPU).
 
-- Compact re-indexing, chỉ user có >= 5 tương tác.
+- Compact re-indexing, chỉ user có >= 3 tương tác.
 - Xuất factors + ids + gate/early-fusion weights.
 """
 import os
@@ -67,7 +67,7 @@ BASE_DIR = find_base_dir()
 
 # 1. LOAD TRAIN + FILTER + COMPACT
 print("\n" + "="*50)
-print("1. LOADING TRAIN (min 5 interactions)")
+print("1. LOADING TRAIN (min 3 interactions)")
 print("="*50)
 train_files = sorted(BASE_DIR.glob("train/*.parquet"))
 dfs = []
@@ -98,33 +98,65 @@ user_inter_count = np.bincount(u_inv, minlength=n_users)
 
 ones = np.ones(len(u_inv), dtype=np.float32)
 user_item_matrix = csr_matrix((ones, (u_inv, i_inv)), shape=(n_users, n_items))
+del train_df
+import gc as _gc; _gc.collect()
 
-# Load ALS factors from Account-1 kernel output (reuse trained ALS)
-import glob as _g
-als_paths = []
-for base in ["/kaggle/input/cf-als-bpr-implicit-datn",
-             "/kaggle/input/nguynteo/cf-als-bpr-implicit-datn"]:
-    als_paths += _g.glob(base + "/**/als_user_factors_f16.npy", recursive=True)
-print("ALS factor candidates:", als_paths)
-if als_paths:
-    pdir = Path(als_paths[0]).parent
-    user_cf = np.load(pdir / "als_user_factors_f16.npy").astype(np.float32)
-    item_cf = np.load(pdir / "als_item_factors_f16.npy").astype(np.float32)
-    # map compact ids from account-1 if available
-    uid_p = pdir / "als_user_ids.npy"
-    iid_p = pdir / "als_item_ids.npy"
-    if uid_p.exists():
-        u_uniq = np.load(uid_p)
-    if iid_p.exists():
-        i_uniq = np.load(iid_p)
-    print(f"Loaded ALS factors: user {user_cf.shape}, item {item_cf.shape}")
+# Load ALS/BPR factors from the CF kernel output (reuse already-trained models)
+from pathlib import Path as _Path
+
+def find_factor_file(filename: str):
+    """Search all mounted inputs for a factor file (kernel_sources mount paths vary)."""
+    hits = sorted(_Path("/kaggle/input").rglob(filename))
+    return hits[0] if hits else None
+
+print("ALS factor candidates:", [str(p) for p in _Path("/kaggle/input").rglob("als_user_factors_f16.npy")])
+
+def load_cf_from_kernel(prefix: str):
+    up = find_factor_file(f"{prefix}_user_factors_f16.npy")
+    ip = find_factor_file(f"{prefix}_item_factors_f16.npy")
+    if up is None or ip is None:
+        return None
+    uf = np.load(up).astype(np.float32)
+    itf = np.load(ip).astype(np.float32)
+    if uf.shape[0] != n_users or itf.shape[0] != n_items:
+        print(f"[{prefix}] shape mismatch: {uf.shape} / {itf.shape} vs ({n_users}, {n_items})")
+        return None
+    uid_p = up.parent / f"{prefix}_user_ids.npy"
+    iid_p = up.parent / f"{prefix}_item_ids.npy"
+    if uid_p.exists() and iid_p.exists():
+        k_uid = np.load(uid_p)
+        k_iid = np.load(iid_p)
+        if not (np.array_equal(k_uid, u_uniq) and np.array_equal(k_iid, i_uniq)):
+            print(f"[{prefix}] id mapping differs from CF kernel -> fallback")
+            return None
+    return uf, itf
+
+_als = load_cf_from_kernel("als")
+if _als is not None:
+    user_cf, item_cf = _als
+    print(f"Reused ALS factors from CF kernel: user {user_cf.shape}, item {item_cf.shape}")
 else:
-    print("ALS factors not found, training ALS locally...")
+    print("ALS factors not found/mismatched, training ALS locally...")
     als = AlternatingLeastSquares(factors=32, regularization=0.05, iterations=10, num_threads=0, random_state=42)
     als.fit(user_item_matrix)
     user_cf = np.asarray(als.user_factors, dtype=np.float32)
     item_cf = np.asarray(als.item_factors, dtype=np.float32)
     del als
+
+_bpr = load_cf_from_kernel("bpr")
+if _bpr is not None:
+    user_bpr, item_bpr = _bpr
+    print(f"Reused BPR factors from CF kernel: user {user_bpr.shape}, item {item_bpr.shape}")
+else:
+    user_bpr, item_bpr = None, None
+    print("BPR factors not available -> BPR will be skipped in evaluation")
+
+# Persist the exact CF factors used here so results are reproducible / servable
+np.save(OUT_DIR / "als_user_factors_f16.npy", user_cf.astype(np.float16))
+np.save(OUT_DIR / "als_item_factors_f16.npy", item_cf.astype(np.float16))
+if user_bpr is not None:
+    np.save(OUT_DIR / "bpr_user_factors_f16.npy", user_bpr.astype(np.float16))
+    np.save(OUT_DIR / "bpr_item_factors_f16.npy", item_bpr.astype(np.float16))
 
 # 2. SBERT
 print("\n" + "="*50)
@@ -150,6 +182,8 @@ for idx in range(len(item_texts)):
 import faiss
 faiss_index = faiss.IndexFlatIP(384)
 faiss_index.add(sbert_embs.astype(np.float32))
+del sbert_embs
+_gc.collect()
 
 np.save(OUT_DIR / "sbert_item_embeddings_f16.npy", item_sbert.astype(np.float16))
 np.save(OUT_DIR / "sbert_item_ids.npy", i_uniq)  # original item ids aligned? item_sbert indexed compactly; save compact->orig via i_uniq
@@ -157,9 +191,9 @@ np.save(OUT_DIR / "sbert_item_ids.npy", i_uniq)  # original item ids aligned? it
 np.save(OUT_DIR / "user_ids.npy", u_uniq)
 np.save(OUT_DIR / "item_ids.npy", i_uniq)
 
-# 3. TEST DATA
+# 3. TEST DATA + USER HISTORY
 print("\n" + "="*50)
-print("3. LOADING TEST")
+print("3. LOADING TEST + TRAIN HISTORY")
 print("="*50)
 test_files = sorted(BASE_DIR.glob("test/*.parquet"))
 dfs_test = []
@@ -182,83 +216,184 @@ test_df["ci"] = test_df["ci"].astype(np.int64)
 
 user_gt = test_df.groupby("cu")["ci"].apply(set).to_dict()
 
-rng = np.random.default_rng(42)
-test_users = np.array(list(user_gt.keys()))
-# filter users with >= MIN_INTERACTIONS in train (compact counts)
-test_users = np.array([u for u in test_users if user_inter_count[u] >= MIN_INTERACTIONS])
-eval_users = rng.choice(test_users, size=min(2000, len(test_users)), replace=False)
-print(f"Eval users (>= {MIN_INTERACTIONS} interactions): {len(eval_users)}")
+# Shared catalog where SBERT has real (non-zero) embeddings.
+# All models are compared on the SAME 200k-item catalog for a fair comparison.
+SBERT_COVERAGE = min(n_items, 200000)
+CAND_POOL = np.arange(SBERT_COVERAGE)
+print(f"Shared evaluation catalog (SBERT coverage): {SBERT_COVERAGE:,} items")
 
-all_items_pool = np.arange(n_items)
+rng = np.random.default_rng(42)
+test_users = np.array([u for u in user_gt.keys() if user_inter_count[u] >= MIN_INTERACTIONS])
+# keep users that have at least one test positive inside the shared catalog
+test_users = np.array([u for u in test_users if any(it < SBERT_COVERAGE for it in user_gt[u])])
+eval_users = rng.choice(test_users, size=min(2000, len(test_users)), replace=False)
+eval_set = set(int(u) for u in eval_users)
+print(f"Eval users (>= {MIN_INTERACTIONS} train interactions, test item in catalog): {len(eval_users):,}")
+
+# Train history (compact, restricted to shared catalog) for the eval users only
+mask = np.isin(u_inv, np.fromiter(eval_set, dtype=np.int64))
+hist_by_user: dict[int, list[int]] = {}
+for uu, ii in zip(u_inv[mask], i_inv[mask]):
+    if ii < SBERT_COVERAGE:
+        hist_by_user.setdefault(int(uu), []).append(int(ii))
+del mask
+
+# Leak-free SBERT user profile = mean of train-history item embeddings
+user_sbert: dict[int, np.ndarray] = {}
+for u in eval_set:
+    h = hist_by_user.get(u, [])
+    if h:
+        v = item_sbert[h].mean(axis=0)
+        nrm = float(np.linalg.norm(v))
+        v = v / nrm if nrm > 1e-8 else np.zeros(384, dtype=np.float32)
+    else:
+        v = np.zeros(384, dtype=np.float32)
+    user_sbert[u] = v.astype(np.float32)
+
+print(f"Built SBERT profiles for {len(user_sbert):,} users")
 
 def compute_metrics(ranked, gt):
     res = {k: 0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
-    pos_list = np.where(ranked == gt)[0]
-    if len(pos_list) == 0: return res
+    pos_list = np.where(np.asarray(ranked) == gt)[0]
+    if len(pos_list) == 0:
+        return res
     pos = int(pos_list[0])
-    if pos < 5: res["HR@5"]=1.0
-    if pos < 10: res["HR@10"]=1.0
-    if pos < 20: res["HR@20"]=1.0
-    if pos < 5: res["NDCG@5"]=1.0/math.log2(pos+2)
-    if pos < 10: res["NDCG@10"]=1.0/math.log2(pos+2)
-    if pos < 20: res["NDCG@20"]=1.0/math.log2(pos+2)
-    res["MRR"]=1.0/(pos+1)
+    if pos < 5: res["HR@5"] = 1.0
+    if pos < 10: res["HR@10"] = 1.0
+    if pos < 20: res["HR@20"] = 1.0
+    if pos < 5: res["NDCG@5"] = 1.0 / math.log2(pos + 2)
+    if pos < 10: res["NDCG@10"] = 1.0 / math.log2(pos + 2)
+    if pos < 20: res["NDCG@20"] = 1.0 / math.log2(pos + 2)
+    res["MRR"] = 1.0 / (pos + 1)
     return res
 
-eval_instances = []
-for u in eval_users:
-    gts = list(user_gt.get(int(u), set()))
-    if not gts: continue
-    gt = gts[0]
-    if gt >= n_items or u >= n_users: continue
-    negs = rng.choice(all_items_pool, size=150, replace=False)
-    negs = [it for it in negs if it not in user_gt[int(u)]][:99]
-    if len(negs) < 99: continue
-    eval_instances.append({"user": int(u), "gt": int(gt), "candidates": np.array([gt]+negs, dtype=np.int64)})
-print(f"Prepared {len(eval_instances)} instances")
+def build_eval_instances():
+    out = []
+    for u in eval_users:
+        u = int(u)
+        gts = [it for it in user_gt[u] if it < SBERT_COVERAGE]
+        if not gts:
+            continue
+        gt = int(rng.choice(gts))
+        banned = set(hist_by_user.get(u, [])) | set(user_gt[u])
+        negs = []
+        for _ in range(10):
+            draw = rng.choice(CAND_POOL, size=300, replace=False)
+            negs = [int(x) for x in draw if int(x) not in banned][:99]
+            if len(negs) == 99:
+                break
+        if len(negs) < 99:
+            continue
+        cands = np.array([gt] + negs, dtype=np.int64)
+        rng.shuffle(cands)
+        out.append({"user": u, "gt": gt, "candidates": cands,
+                    "banned": np.array(sorted(banned), dtype=np.int64)})
+    return out
 
-# 4. BASELINE LATE FUSION
+eval_instances = build_eval_instances()
+print(f"Prepared {len(eval_instances):,} evaluation instances (1 positive + 99 negatives)")
+
+TEST_N, VAL_N = 500, 300
+test_inst = eval_instances[:TEST_N]
+val_inst = eval_instances[TEST_N:TEST_N + VAL_N]
+train_inst = eval_instances[TEST_N + VAL_N:]
+print(f"Split -> test={len(test_inst)}, val={len(val_inst)}, train={len(train_inst)}")
+
+def mm(x):
+    x = np.asarray(x, dtype=np.float32)
+    mn, mx = x.min(), x.max()
+    if mx - mn < 1e-8:
+        return np.zeros_like(x)
+    return (x - mn) / (mx - mn)
+
+def cf_scores(uf, itf, u, cands):
+    return np.asarray(itf[cands] @ uf[u], dtype=np.float32)
+
+def sb_scores(u, cands):
+    return np.asarray(item_sbert[cands] @ user_sbert[u], dtype=np.float32)
+
+def fuse(cf, sb, alpha):
+    return alpha * mm(cf) + (1.0 - alpha) * mm(sb)
+
+def eval_scorer(fn, instances):
+    agg = {k: 0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
+    if not instances:
+        return agg
+    for inst in instances:
+        scores = fn(inst["user"], inst["candidates"])
+        ranked = inst["candidates"][np.argsort(-scores)]
+        m = compute_metrics(ranked, inst["gt"])
+        for k in agg:
+            agg[k] += m[k]
+    return {k: round(v / len(instances), 4) for k, v in agg.items()}
+
+def eval_fusion(alpha, instances):
+    return eval_scorer(lambda u, c: fuse(cf_scores(user_cf, item_cf, u, c), sb_scores(u, c), alpha), instances)
+
+# 4. BASELINES
 print("\n" + "="*50)
-print("4. BASELINE LATE FUSION")
+print("4. BASELINE MODELS (ALS / BPR / SBERT)")
 print("="*50)
-late_alphas = [0.0, 0.3, 0.5, 0.7, 1.0]
-best_alpha = 0.5
-best_hr = 0.0
-for alpha in late_alphas:
-    agg = {k:0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
-    for inst in eval_instances[:500]:
-        u = inst["user"]; gt = inst["gt"]; cands = inst["candidates"]
-        cf_scores = item_cf[cands] @ user_cf[u]
-        sb_scores = item_sbert[cands] @ item_sbert[gt]
-        fused = alpha*(cf_scores-cf_scores.min())/(cf_scores.max()-cf_scores.min()+1e-8) + (1-alpha)*(sb_scores-sb_scores.min())/(sb_scores.max()-sb_scores.min()+1e-8)
-        ranked = cands[np.argsort(-fused)]
-        m = compute_metrics(ranked, gt)
-        for k in agg: agg[k]+=m[k]
-    for k in agg: agg[k]/=min(500,len(eval_instances))
-    if agg["HR@10"] > best_hr:
-        best_hr = agg["HR@10"]; best_alpha = alpha
-    print(f"alpha={alpha}: HR@10={agg['HR@10']:.4f}")
-print(f"Best alpha={best_alpha}")
+res_als = eval_scorer(lambda u, c: cf_scores(user_cf, item_cf, u, c), test_inst)
+print("ALS          :", res_als)
+res_bpr = None
+if user_bpr is not None:
+    res_bpr = eval_scorer(lambda u, c: cf_scores(user_bpr, item_bpr, u, c), test_inst)
+    print("BPR          :", res_bpr)
+res_sbert = eval_scorer(sb_scores, test_inst)
+print("SBERT        :", res_sbert)
 
-# 5. TWO-STAGE + RERANKER
+# 5. LATE FUSION (alpha tuned on VAL, reported on TEST)
 print("\n" + "="*50)
-print("5. TWO-STAGE RETRIEVAL")
+print("5. LATE FUSION GRID")
 print("="*50)
-ts_agg = {k:0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
-for inst in tqdm(eval_instances[:500], desc="Two-stage"):
-    u = inst["user"]; gt = inst["gt"]; cands = inst["candidates"]
-    cf_scores = item_cf[cands] @ user_cf[u]
-    top_cf = cands[np.argsort(-cf_scores)[:25]]
-    union = list(dict.fromkeys(list(top_cf) + list(cands[:25])))
-    ranked = np.array(union[:25])
-    m = compute_metrics(ranked, gt)
-    for k in ts_agg: ts_agg[k]+=m[k]
-for k in ts_agg: ts_agg[k]/=min(500,len(eval_instances))
-print(f"Two-Stage: HR@10={ts_agg['HR@10']:.4f}")
+late_alphas = [0.0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+late_val = {}
+best_alpha, best_hr = 0.9, -1.0
+for a in late_alphas:
+    m = eval_fusion(a, val_inst)
+    late_val[a] = m
+    print(f"alpha={a:.1f} val HR@10={m['HR@10']:.4f} NDCG@10={m['NDCG@10']:.4f}")
+    if m["HR@10"] > best_hr:
+        best_hr, best_alpha = m["HR@10"], a
+res_late = eval_fusion(best_alpha, test_inst)
+print(f"Best alpha={best_alpha} (val HR@10={best_hr:.4f}) -> test {res_late}")
 
-# 6. LIGHT GATED LATE FUSION
+# 6. TWO-STAGE RETRIEVAL (union of CF top-50 + SBERT top-50, linear rerank)
 print("\n" + "="*50)
-print("6. LIGHT GATED LATE FUSION")
+print("6. TWO-STAGE RETRIEVAL")
+print("="*50)
+
+def topk_full(mat, vec, k, banned):
+    s = mat @ vec
+    if len(banned):
+        b = banned[(banned >= 0) & (banned < len(s))]
+        s[b] = -np.inf
+    k = min(k, len(s) - 1)
+    idx = np.argpartition(-s, k)[:k]
+    return idx[np.argsort(-s[idx])]
+
+def two_stage_scores(inst):
+    u = inst["user"]
+    banned = inst["banned"]
+    cf_top = topk_full(item_cf, user_cf[u], 50, banned)
+    sb_top = topk_full(item_sbert[:SBERT_COVERAGE], user_sbert[u], 50, banned)
+    union = np.array(list(dict.fromkeys(list(cf_top) + list(sb_top))), dtype=np.int64)
+    return union, fuse(cf_scores(user_cf, item_cf, u, union), sb_scores(u, union), best_alpha)
+
+ts_agg = {k: 0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
+for inst in tqdm(test_inst, desc="Two-stage"):
+    union, scores = two_stage_scores(inst)
+    ranked = union[np.argsort(-scores)]
+    m = compute_metrics(ranked, inst["gt"])
+    for k in ts_agg:
+        ts_agg[k] += m[k]
+res_two_stage = {k: round(v / max(1, len(test_inst)), 4) for k, v in ts_agg.items()}
+print("Two-Stage    :", res_two_stage)
+
+# 7. LIGHT GATED LATE FUSION
+print("\n" + "="*50)
+print("7. LIGHT GATED LATE FUSION")
 print("="*50)
 
 class LightGate(nn.Module):
@@ -270,20 +405,21 @@ class LightGate(nn.Module):
     def forward(self, u_cf, i_cf, i_sbert, cf_score, sbert_score):
         feat = torch.cat([u_cf, i_cf, i_sbert], dim=-1)
         alpha = self.gate_net(feat).squeeze(-1)
-        fused = alpha*cf_score + (1.0-alpha)*sbert_score
-        return fused, alpha
+        return alpha * cf_score + (1.0 - alpha) * sbert_score, alpha
 
 gate_model = LightGate().to(DEVICE)
 gate_opt = torch.optim.Adam(gate_model.parameters(), lr=1e-3, weight_decay=1e-5)
 bce = nn.BCEWithLogitsLoss()
 
-gate_Xu=[]; gate_Xi=[]; gate_Xs=[]; gate_cf=[]; gate_sb=[]; gate_y=[]
-for inst in eval_instances[500:1500]:
-    u = inst["user"]; pos = inst["gt"]; neg = inst["candidates"][1]
-    for it, label in [(pos,1.0),(neg,0.0)]:
+gate_Xu, gate_Xi, gate_Xs, gate_cf, gate_sb, gate_y = [], [], [], [], [], []
+train_for_fit = train_inst[:1000] if len(train_inst) else []
+for inst in train_for_fit:
+    u = inst["user"]; pos = inst["gt"]
+    negs = [int(x) for x in inst["candidates"] if int(x) != pos][:1]
+    for it, label in [(pos, 1.0)] + [(n, 0.0) for n in negs]:
         gate_Xu.append(user_cf[u]); gate_Xi.append(item_cf[it]); gate_Xs.append(item_sbert[it])
         gate_cf.append(float(item_cf[it] @ user_cf[u]))
-        gate_sb.append(float(item_sbert[it] @ item_sbert[pos]))
+        gate_sb.append(float(item_sbert[it] @ user_sbert[u]))
         gate_y.append(label)
 
 t_u = torch.tensor(np.array(gate_Xu), dtype=torch.float32)
@@ -292,17 +428,16 @@ t_s = torch.tensor(np.array(gate_Xs), dtype=torch.float32)
 t_cf = torch.tensor(np.array(gate_cf), dtype=torch.float32)
 t_sb = torch.tensor(np.array(gate_sb), dtype=torch.float32)
 t_y = torch.tensor(np.array(gate_y), dtype=torch.float32)
-
 ds = TensorDataset(t_u, t_i, t_s, t_cf, t_sb, t_y)
 loader = DataLoader(ds, batch_size=256, shuffle=True)
 
 gate_model.train()
 for ep in range(5):
-    tot=0.0
-    for bu,bi,bs,bcf,bsb,by in loader:
-        bu,bi,bs=bu.to(DEVICE),bi.to(DEVICE),bs.to(DEVICE)
-        bcf,bsb,by=bcf.to(DEVICE),bsb.to(DEVICE),by.to(DEVICE)
-        pred,_ = gate_model(bu,bi,bs,bcf,bsb)
+    tot = 0.0
+    for bu, bi, bs, bcf, bsb, by in loader:
+        bu, bi, bs = bu.to(DEVICE), bi.to(DEVICE), bs.to(DEVICE)
+        bcf, bsb, by = bcf.to(DEVICE), bsb.to(DEVICE), by.to(DEVICE)
+        pred, _ = gate_model(bu, bi, bs, bcf, bsb)
         loss = bce(pred, by)
         gate_opt.zero_grad(); loss.backward(); gate_opt.step()
         tot += loss.item()
@@ -310,35 +445,36 @@ for ep in range(5):
 
 torch.save(gate_model.state_dict(), OUT_DIR / "light_gated_fusion.pt")
 
-gate_model.eval()
-gate_agg = {k:0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
-with torch.no_grad():
-    for inst in eval_instances[:500]:
-        u=inst["user"]; gt=inst["gt"]; cands=inst["candidates"]
-        bu = torch.tensor(user_cf[u], dtype=torch.float32).unsqueeze(0).repeat(len(cands),1).to(DEVICE)
-        bi = torch.tensor(item_cf[cands], dtype=torch.float32).to(DEVICE)
-        bs = torch.tensor(item_sbert[cands], dtype=torch.float32).to(DEVICE)
-        bcf = torch.tensor(item_cf[cands] @ user_cf[u], dtype=torch.float32).to(DEVICE)
-        bsb = torch.tensor(item_sbert[cands] @ item_sbert[gt], dtype=torch.float32).to(DEVICE)
-        fused,_ = gate_model(bu,bi,bs,bcf,bsb)
-        fused = fused.cpu().numpy()
-        ranked = cands[np.argsort(-fused)]
-        m = compute_metrics(ranked, gt)
-        for k in gate_agg: gate_agg[k]+=m[k]
-for k in gate_agg: gate_agg[k]/=min(500,len(eval_instances))
-print(f"Light Gated Fusion: HR@10={gate_agg['HR@10']:.4f} NDCG@10={gate_agg['NDCG@10']:.4f} MRR={gate_agg['MRR']:.4f}")
+def eval_gate(instances):
+    gate_model.eval()
+    agg = {k: 0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
+    with torch.no_grad():
+        for inst in instances:
+            u = inst["user"]; cands = inst["candidates"]; gt = inst["gt"]
+            bu = torch.tensor(np.repeat(user_cf[u][None, :], len(cands), axis=0), dtype=torch.float32).to(DEVICE)
+            bi = torch.tensor(item_cf[cands], dtype=torch.float32).to(DEVICE)
+            bs = torch.tensor(item_sbert[cands], dtype=torch.float32).to(DEVICE)
+            bcf = torch.tensor(cf_scores(user_cf, item_cf, u, cands), dtype=torch.float32).to(DEVICE)
+            bsb = torch.tensor(sb_scores(u, cands), dtype=torch.float32).to(DEVICE)
+            fused, _ = gate_model(bu, bi, bs, bcf, bsb)
+            ranked = cands[np.argsort(-fused.cpu().numpy())]
+            m = compute_metrics(ranked, gt)
+            for k in agg:
+                agg[k] += m[k]
+    return {k: round(v / max(1, len(instances)), 4) for k, v in agg.items()}
 
-# 7. DEEP EARLY FUSION
+res_gate = eval_gate(test_inst)
+print("Light Gated  :", res_gate)
+
+# 8. DEEP EARLY FUSION
 print("\n" + "="*50)
-print("7. DEEP EARLY FUSION")
+print("8. DEEP EARLY FUSION")
 print("="*50)
 
 class DeepEarlyFusion(nn.Module):
     def __init__(self, in_dim, cross_layers=3, hidden=128):
         super().__init__()
-        self.cross = nn.ModuleList()
-        for _ in range(cross_layers):
-            self.cross.append(nn.Linear(in_dim, in_dim))
+        self.cross = nn.ModuleList([nn.Linear(in_dim, in_dim) for _ in range(cross_layers)])
         self.deep = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(),
                                   nn.Linear(hidden, hidden), nn.ReLU(),
                                   nn.Linear(hidden, 1))
@@ -350,56 +486,98 @@ class DeepEarlyFusion(nn.Module):
         cross_out = xi.mean(dim=-1, keepdim=True)
         return (cross_out + deep_out).squeeze(-1)
 
-in_dim = 32+32+384
+in_dim = 32 + 32 + 384
 deep_model = DeepEarlyFusion(in_dim).to(DEVICE)
 deep_opt = torch.optim.Adam(deep_model.parameters(), lr=1e-3)
 bce2 = nn.BCEWithLogitsLoss()
 
-# build samples
-pos_rows=[]; neg_rows=[]
-for inst in eval_instances[500:1500]:
-    pos_rows.append((inst["user"], inst["gt"]))
-    neg_rows.append((inst["user"], inst["candidates"][1]))
-
-def build_samples(rows, label):
-    X=[]; y=[]
-    for u,it in rows:
-        feat = np.concatenate([user_cf[u], item_cf[it], item_sbert[it]])
-        X.append(feat); y.append(label)
-    return X,y
-
-Xp,yp = build_samples(pos_rows, 1.0)
-Xn,yn = build_samples(neg_rows, 0.0)
-X = np.array(Xp+Xn, dtype=np.float32)
-y = np.array(yp+yn, dtype=np.float32)
-
+X, y = [], []
+for inst in train_for_fit:
+    u = inst["user"]; pos = inst["gt"]
+    negs = [int(x) for x in inst["candidates"] if int(x) != pos][:1]
+    for it, label in [(pos, 1.0)] + [(n, 0.0) for n in negs]:
+        X.append(np.concatenate([user_cf[u], item_cf[it], item_sbert[it]]))
+        y.append(label)
+X = np.array(X, dtype=np.float32)
+y = np.array(y, dtype=np.float32)
 ds2 = TensorDataset(torch.tensor(X), torch.tensor(y))
 loader2 = DataLoader(ds2, batch_size=512, shuffle=True)
 
 deep_model.train()
 for ep in range(3):
-    tot=0.0
-    for xb,yb in loader2:
-        xb,yb = xb.to(DEVICE), yb.to(DEVICE)
-        logits = deep_model(xb)
-        loss = bce2(logits, yb)
+    tot = 0.0
+    for xb, yb in loader2:
+        xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+        loss = bce2(deep_model(xb), yb)
         deep_opt.zero_grad(); loss.backward(); deep_opt.step()
         tot += loss.item()
     print(f"Deep Epoch {ep+1}/3 Loss: {tot/len(loader2):.4f}")
 
 torch.save(deep_model.state_dict(), OUT_DIR / "deep_early_fusion.pt")
 
-# summary
+def eval_deep(instances):
+    deep_model.eval()
+    agg = {k: 0.0 for k in ["HR@5","HR@10","HR@20","NDCG@5","NDCG@10","NDCG@20","MRR"]}
+    with torch.no_grad():
+        for inst in instances:
+            u = inst["user"]; cands = inst["candidates"]; gt = inst["gt"]
+            feats = np.concatenate([
+                np.repeat(user_cf[u][None, :], len(cands), axis=0),
+                item_cf[cands],
+                item_sbert[cands],
+            ], axis=1)
+            logits = deep_model(torch.tensor(feats, dtype=torch.float32).to(DEVICE)).cpu().numpy()
+            ranked = cands[np.argsort(-logits)]
+            m = compute_metrics(ranked, gt)
+            for k in agg:
+                agg[k] += m[k]
+    return {k: round(v / max(1, len(instances)), 4) for k, v in agg.items()}
+
+res_deep = eval_deep(test_inst)
+print("Deep Early   :", res_deep)
+
+# 9. SUMMARY
 summary = {
-    "LateFusion_best_alpha": best_alpha,
-    "TwoStage_HR10": float(ts_agg["HR@10"]),
-    "LightGated_HR10": float(gate_agg["HR@10"]),
-    "LightGated_NDCG10": float(gate_agg["NDCG@10"]),
-    "LightGated_MRR": float(gate_agg["MRR"]),
-    "n_eval_users": len(eval_instances),
+    "protocol": "1 positive + 99 random negatives, shared SBERT-covered item catalog, leak-free SBERT user profiles",
+    "eval_catalog_items": int(SBERT_COVERAGE),
+    "n_eval_users": len(test_inst),
+    "n_val_users": len(val_inst),
+    "n_train_users": len(train_inst),
     "min_interactions": MIN_INTERACTIONS,
+    "als": res_als,
+    "bpr": res_bpr,
+    "sbert": res_sbert,
+    "late_fusion": {"best_alpha": best_alpha, "val_HR10": round(best_hr, 4), "test": res_late,
+                    "grid_val": {str(a): m for a, m in late_val.items()}},
+    "two_stage": res_two_stage,
+    "light_gated": res_gate,
+    "deep_early_fusion": res_deep,
+    # legacy flat keys kept for compatibility
+    "LateFusion_best_alpha": best_alpha,
+    "TwoStage_HR10": res_two_stage["HR@10"],
+    "LightGated_HR10": res_gate["HR@10"],
+    "LightGated_NDCG10": res_gate["NDCG@10"],
+    "LightGated_MRR": res_gate["MRR"],
 }
 with open(OUT_DIR / "deep_hybrids_summary.json", "w") as f:
     json.dump(summary, f, indent=2)
-print("DONE. Artifacts in", OUT_DIR)
+
+# Save FAISS index for the shared catalog (aligned with sbert_item_ids.npy rows 0..SBERT_COVERAGE-1)
+faiss.write_index(faiss_index, str(OUT_DIR / "sbert_faiss.index"))
+np.save(OUT_DIR / "sbert_index_ids.npy", np.arange(SBERT_COVERAGE, dtype=np.int64))
+
+print("\n" + "="*70)
+print("FINAL COMPARISON (TEST SET, N=%d)" % len(test_inst))
+print("="*70)
+rows = [("ALS", res_als), ("BPR", res_bpr), ("SBERT", res_sbert),
+        (f"Late Fusion (a={best_alpha})", res_late), ("Two-Stage", res_two_stage),
+        ("Light Gated", res_gate), ("Deep Early Fusion", res_deep)]
+print(f"{'Model':<26} {'HR@5':>7} {'HR@10':>7} {'HR@20':>7} {'NDCG@10':>8} {'MRR':>7}")
+for name, m in rows:
+    if m is None:
+        print(f"{name:<26} {'n/a':>7}")
+        continue
+    print(f"{name:<26} {m['HR@5']:>7.4f} {m['HR@10']:>7.4f} {m['HR@20']:>7.4f} {m['NDCG@10']:>8.4f} {m['MRR']:>7.4f}")
+print("="*70)
 print(json.dumps(summary, indent=2))
+print("DONE. Artifacts in", OUT_DIR)
