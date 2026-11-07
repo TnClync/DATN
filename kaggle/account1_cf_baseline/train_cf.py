@@ -53,7 +53,7 @@ BASE_DIR = find_base_dir()
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts/factors")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MIN_INTERACTIONS = 1
+MIN_INTERACTIONS = 3
 
 # 1. LOAD + FILTER
 print("\n" + "="*50)

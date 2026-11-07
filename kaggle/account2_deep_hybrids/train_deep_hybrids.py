@@ -42,7 +42,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MIN_INTERACTIONS = 1
+MIN_INTERACTIONS = 3
 
 def find_base_dir() -> Path:
     candidates = [
