@@ -53,7 +53,7 @@ BASE_DIR = find_base_dir()
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts/factors")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MIN_INTERACTIONS = 5
+MIN_INTERACTIONS = 1
 
 # 1. LOAD + FILTER
 print("\n" + "="*50)
@@ -94,7 +94,7 @@ print("\n" + "="*50)
 print("2. TRAINING ALS")
 print("="*50)
 t0 = time.time()
-als_model = AlternatingLeastSquares(factors=64, regularization=0.05, iterations=15,
+als_model = AlternatingLeastSquares(factors=32, regularization=0.05, iterations=12,
                                      calculate_training_loss=True, num_threads=0, random_state=42)
 als_model.fit(user_item_matrix)
 als_time = time.time() - t0
@@ -115,7 +115,7 @@ print("\n" + "="*50)
 print("3. TRAINING BPR")
 print("="*50)
 t0 = time.time()
-bpr_model = BayesianPersonalizedRanking(factors=64, learning_rate=0.05, regularization=0.05,
+bpr_model = BayesianPersonalizedRanking(factors=32, learning_rate=0.05, regularization=0.05,
                                         iterations=30, num_threads=0, random_state=42)
 bpr_model.fit(user_item_matrix)
 bpr_time = time.time() - t0

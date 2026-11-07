@@ -42,7 +42,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MIN_INTERACTIONS = 5
+MIN_INTERACTIONS = 1
 
 def find_base_dir() -> Path:
     candidates = [
@@ -100,7 +100,7 @@ ones = np.ones(len(u_inv), dtype=np.float32)
 user_item_matrix = csr_matrix((ones, (u_inv, i_inv)), shape=(n_users, n_items))
 
 print("Fitting ALS...")
-als = AlternatingLeastSquares(factors=64, regularization=0.05, iterations=12, num_threads=0, random_state=42)
+als = AlternatingLeastSquares(factors=32, regularization=0.05, iterations=10, num_threads=0, random_state=42)
 als.fit(user_item_matrix)
 user_cf = np.asarray(als.user_factors, dtype=np.float32)
 item_cf = np.asarray(als.item_factors, dtype=np.float32)
