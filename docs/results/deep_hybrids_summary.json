@@ -1,0 +1,9 @@
+{
+  "LateFusion_best_alpha": 0.0,
+  "TwoStage_HR10": 0.704,
+  "LightGated_HR10": 0.756,
+  "LightGated_NDCG10": 0.6141254183105017,
+  "LightGated_MRR": 0.5777236550398498,
+  "n_eval_users": 2000,
+  "min_interactions": 5
+}

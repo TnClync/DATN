@@ -1,0 +1,63 @@
+{
+  "ALS (implicit)": {
+    "split": "Test",
+    "HR@5": 0.6938,
+    "HR@10": 0.7644,
+    "HR@20": 0.8338,
+    "NDCG@5": 0.595165556603246,
+    "NDCG@10": 0.617916197224724,
+    "NDCG@20": 0.6354423220464895,
+    "MRR": 0.5798308093851355,
+    "train_time_sec": 236.35505151748657,
+    "n_eval_users": 5000
+  },
+  "BPR (implicit)": {
+    "split": "Test",
+    "HR@5": 0.6455,
+    "HR@10": 0.7265,
+    "HR@20": 0.795,
+    "NDCG@5": 0.511279106044014,
+    "NDCG@10": 0.537678927148796,
+    "NDCG@20": 0.5548758700685451,
+    "MRR": 0.4869068091563291,
+    "train_time_sec": 65.2,
+    "n_eval_users": 2000
+  },
+  "SBERT (all-MiniLM-L6-v2)": {
+    "split": "Test",
+    "HR@5": 0.0684931506849315,
+    "HR@10": 0.1506849315068493,
+    "HR@20": 0.2465753424657534,
+    "NDCG@5": 0.03807728860203992,
+    "NDCG@10": 0.06373833464448164,
+    "NDCG@20": 0.08877022366625192,
+    "MRR": 0.06333577847021386,
+    "encode_time_sec": 34.92141056060791,
+    "n_eval_users": 73
+  },
+  "Late Fusion (alpha=0.9)": {
+    "split": "Test",
+    "HR@5": 0.704,
+    "HR@10": 0.779,
+    "HR@20": 0.8335,
+    "NDCG@5": 0.5937,
+    "NDCG@10": 0.6181,
+    "NDCG@20": 0.6319,
+    "MRR": 0.5744,
+    "train_time_sec": 1.0,
+    "n_eval_users": 2000
+  },
+  "Light Gated Fusion (Kaggle)": {
+    "split": "Test (Kaggle)",
+    "HR@10": 0.756,
+    "NDCG@10": 0.6141254183105017,
+    "MRR": 0.5777236550398498,
+    "n_eval_users": 2000,
+    "min_interactions": 5
+  },
+  "Two-Stage Retrieval (Kaggle)": {
+    "split": "Test (Kaggle)",
+    "HR@10": 0.704,
+    "n_eval_users": 2000
+  }
+}
