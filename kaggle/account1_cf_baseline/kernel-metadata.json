@@ -1,6 +1,6 @@
 {
-  "id": "nguynteo/train-cf-als-bpr-implicit",
-  "title": "Train CF ALS BPR Implicit",
+  "id": "nguyenteo/cf-als-bpr-implicit-datn",
+  "title": "CF ALS BPR Implicit DATN",
   "code_file": "train_cf.py",
   "language": "python",
   "kernel_type": "script",

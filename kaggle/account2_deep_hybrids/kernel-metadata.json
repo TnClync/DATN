@@ -1,6 +1,6 @@
 {
-  "id": "nguynteo/train-deep-hybrid-recommender",
-  "title": "Train Deep Hybrid Recommender",
+  "id": "nguynteo/deep-hybrid-recommender-datn",
+  "title": "Deep Hybrid Recommender DATN",
   "code_file": "train_deep_hybrids.py",
   "language": "python",
   "kernel_type": "script",
