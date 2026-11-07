@@ -172,6 +172,8 @@ def recommend(req: RecommendRequest):
 
     if req.k < 1 or req.k > 100:
         raise HTTPException(status_code=400, detail="k must be 1..100")
+    if req.user_idx is not None and (req.user_idx < 0 or req.user_idx >= NUM_USERS):
+        raise HTTPException(status_code=400, detail="user_idx out of range")
 
     t0 = time.perf_counter()
     cf_override = "bpr" if req.model == "bpr" else "als" if req.model == "als" else None

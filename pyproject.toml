@@ -20,4 +20,6 @@ dependencies = [
     "faiss-cpu>=1.15.1",
     "python-docx>=1.2.0",
     "matplotlib>=3.10.9",
+    "implicit>=0.7.3",
+    "duckdb>=1.5.6",
 ]

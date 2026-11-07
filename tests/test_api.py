@@ -11,13 +11,14 @@ client = TestClient(app)
 def test_health():
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    assert r.json()["status"] == "online"
 
 
 def test_models():
     r = client.get("/models")
     assert r.status_code == 200
-    assert "late_fusion" in r.json()["models"]
+    ids = [m["id"] for m in r.json()["models"]]
+    assert "late_fusion" in ids
 
 
 def test_recommend():
