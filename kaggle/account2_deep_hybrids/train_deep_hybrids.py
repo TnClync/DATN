@@ -262,7 +262,7 @@ print("6. LIGHT GATED LATE FUSION")
 print("="*50)
 
 class LightGate(nn.Module):
-    def __init__(self, in_features=64+64+384):
+    def __init__(self, in_features=32+32+384):
         super().__init__()
         self.gate_net = nn.Sequential(
             nn.Linear(in_features, 64), nn.ReLU(), nn.Dropout(0.1),
@@ -350,7 +350,7 @@ class DeepEarlyFusion(nn.Module):
         cross_out = xi.mean(dim=-1, keepdim=True)
         return (cross_out + deep_out).squeeze(-1)
 
-in_dim = 64+64+384
+in_dim = 32+32+384
 deep_model = DeepEarlyFusion(in_dim).to(DEVICE)
 deep_opt = torch.optim.Adam(deep_model.parameters(), lr=1e-3)
 bce2 = nn.BCEWithLogitsLoss()
