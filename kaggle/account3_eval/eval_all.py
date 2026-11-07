@@ -30,9 +30,16 @@ TUNE_N = 10_000
 try:
     import faiss
     HAS_FAISS = True
-except Exception as exc:  # pragma: no cover
-    print("faiss unavailable:", exc)
-    HAS_FAISS = False
+except Exception:  # pragma: no cover
+    try:
+        import subprocess
+        import sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "faiss-cpu"])
+        import faiss
+        HAS_FAISS = True
+    except Exception as exc:
+        print("faiss unavailable:", exc)
+        HAS_FAISS = False
 
 
 # --------------------------------------------------------------------- inputs
