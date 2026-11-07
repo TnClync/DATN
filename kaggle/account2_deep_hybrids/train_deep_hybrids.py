@@ -99,12 +99,32 @@ user_inter_count = np.bincount(u_inv, minlength=n_users)
 ones = np.ones(len(u_inv), dtype=np.float32)
 user_item_matrix = csr_matrix((ones, (u_inv, i_inv)), shape=(n_users, n_items))
 
-print("Fitting ALS...")
-als = AlternatingLeastSquares(factors=32, regularization=0.05, iterations=10, num_threads=0, random_state=42)
-als.fit(user_item_matrix)
-user_cf = np.asarray(als.user_factors, dtype=np.float32)
-item_cf = np.asarray(als.item_factors, dtype=np.float32)
-del user_item_matrix, als
+# Load ALS factors from Account-1 kernel output (reuse trained ALS)
+import glob as _g
+als_paths = []
+for base in ["/kaggle/input/cf-als-bpr-implicit-datn",
+             "/kaggle/input/nguynteo/cf-als-bpr-implicit-datn"]:
+    als_paths += _g.glob(base + "/**/als_user_factors_f16.npy", recursive=True)
+print("ALS factor candidates:", als_paths)
+if als_paths:
+    pdir = Path(als_paths[0]).parent
+    user_cf = np.load(pdir / "als_user_factors_f16.npy").astype(np.float32)
+    item_cf = np.load(pdir / "als_item_factors_f16.npy").astype(np.float32)
+    # map compact ids from account-1 if available
+    uid_p = pdir / "als_user_ids.npy"
+    iid_p = pdir / "als_item_ids.npy"
+    if uid_p.exists():
+        u_uniq = np.load(uid_p)
+    if iid_p.exists():
+        i_uniq = np.load(iid_p)
+    print(f"Loaded ALS factors: user {user_cf.shape}, item {item_cf.shape}")
+else:
+    print("ALS factors not found, training ALS locally...")
+    als = AlternatingLeastSquares(factors=32, regularization=0.05, iterations=10, num_threads=0, random_state=42)
+    als.fit(user_item_matrix)
+    user_cf = np.asarray(als.user_factors, dtype=np.float32)
+    item_cf = np.asarray(als.item_factors, dtype=np.float32)
+    del als
 
 # 2. SBERT
 print("\n" + "="*50)

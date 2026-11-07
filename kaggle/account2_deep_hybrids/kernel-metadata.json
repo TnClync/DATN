@@ -13,5 +13,7 @@
     "nguynteo/lastreview"
   ],
   "competition_sources": [],
-  "kernel_sources": []
+  "kernel_sources": [
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
 }
