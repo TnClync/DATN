@@ -158,9 +158,11 @@ def models():
     return {
         "models": [
             {"id": "late_fusion", "name": "Late Fusion (ALS + SBERT)", "type": "Hybrid", "desc": "Linear combination with dynamic weight alpha"},
+            {"id": "light_gated", "name": "Light Gated Late Fusion", "type": "Deep Hybrid", "desc": "Neural gate learns a per-(user,item) fusion weight"},
+            {"id": "deep_early", "name": "Deep Early Fusion (DCN)", "type": "Deep Hybrid", "desc": "Cross-network over [user_cf, item_cf, item_sbert]"},
             {"id": "two_stage", "name": "Two-Stage Retrieval", "type": "Deep Hybrid", "desc": "CF + CB Candidate Union (300) -> Reranking"},
-            {"id": "als", "name": "Alternating Least Squares (ALS)", "type": "Collaborative", "desc": "Implicit matrix factorization (factors=64)"},
-            {"id": "bpr", "name": "Bayesian Personalized Ranking (BPR)", "type": "Collaborative", "desc": "Pairwise ranking optimization"},
+            {"id": "als", "name": "Alternating Least Squares (ALS)", "type": "Collaborative", "desc": "Implicit matrix factorization (factors=32, min_interactions=3)"},
+            {"id": "bpr", "name": "Bayesian Personalized Ranking (BPR)", "type": "Collaborative", "desc": "Pairwise ranking optimization (factors=32, min_interactions=3)"},
             {"id": "sbert", "name": "SBERT Content-Based", "type": "Content", "desc": "all-MiniLM-L6-v2 + FAISS IndexFlatIP"}
         ]
     }

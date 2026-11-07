@@ -1,0 +1,19 @@
+{
+  "id": "nguynteo/eval-all-recommender-models-datn",
+  "title": "Eval All Recommender Models DATN",
+  "code_file": "eval_all.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "false",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "nguynteo/deep-hybrid-recommender-datn"
+  ]
+}

@@ -275,7 +275,8 @@ def build_eval_instances():
         if not gts:
             continue
         gt = int(rng.choice(gts))
-        banned = set(hist_by_user.get(u, [])) | set(user_gt[u])
+        # Ban history + other test positives, but KEEP the target positive (needed by retrieval eval)
+        banned = (set(hist_by_user.get(u, [])) | set(user_gt[u])) - {gt}
         negs = []
         for _ in range(10):
             draw = rng.choice(CAND_POOL, size=300, replace=False)

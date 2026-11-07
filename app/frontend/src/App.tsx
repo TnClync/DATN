@@ -432,8 +432,10 @@ export default function App() {
                 <div className="space-y-2 mb-4">
                   {[
                     { id: 'late_fusion', name: 'Late Fusion (ALS + SBERT)', badge: 'Đề Xuất Baseline', color: 'text-indigo-400 border-indigo-500/30 bg-indigo-500/10' },
+                    { id: 'light_gated', name: 'Light Gated Late Fusion', badge: 'Neural Gate', color: 'text-amber-400 border-amber-500/30 bg-amber-500/10' },
+                    { id: 'deep_early', name: 'Deep Early Fusion (DCN)', badge: 'Cross Network', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' },
                     { id: 'two_stage', name: 'Two-Stage Rerank (Deep)', badge: 'SOTA Hybrid', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' },
-                    { id: 'als', name: 'ALS Collaborative Filtering', badge: 'implicit 64D', color: 'text-purple-400 border-purple-500/30 bg-purple-500/10' },
+                    { id: 'als', name: 'ALS Collaborative Filtering', badge: 'implicit 32D', color: 'text-purple-400 border-purple-500/30 bg-purple-500/10' },
                     { id: 'bpr', name: 'BPR Bayesian Ranking', badge: 'implicit 32D', color: 'text-pink-400 border-pink-500/30 bg-pink-500/10' },
                     { id: 'sbert', name: 'SBERT Semantic Content', badge: 'FAISS IP', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
                   ].map(m => (
