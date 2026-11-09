@@ -26,6 +26,26 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EVAL_BATCH_USERS = 128   # eval: score this many users in ONE item-tower forward pass
 
+_T0 = time.time()
+
+def log(msg: str):
+    print(f"[{time.strftime('%H:%M:%S')} +{time.time() - _T0:7.1f}s] {msg}", flush=True)
+
+def mem_info() -> str:
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return f"{rss / 1e9:.1f} GB" if rss > 1e9 else f"{rss / 1e6:.1f} MB"
+    except Exception:
+        return "n/a"
+
+def gpu_mem() -> str:
+    if not torch.cuda.is_available():
+        return "CPU"
+    return " | ".join(f"GPU{i} alloc={torch.cuda.memory_allocated(i)/1e9:.1f}G res={torch.cuda.memory_reserved(i)/1e9:.1f}G" for i in range(torch.cuda.device_count()))
+
+log(f"CONFIG: DEVICE={DEVICE} EVAL_BATCH_USERS={EVAL_BATCH_USERS} | {gpu_mem()}")
+
 
 def find_base_dir():
     for c in [Path("/kaggle/input/lastone/amazon_recs_output"), Path("/kaggle/input/lastone"),
@@ -173,7 +193,7 @@ test_users = np.array([u for u in user_gt.keys() if user_inter_count[u] >= MIN_I
 test_users = np.array([u for u in test_users if any(it < SBERT_COVERAGE for it in user_gt[u])])
 eval_users = np.random.default_rng(42).choice(test_users, size=min(50000, len(test_users)), replace=False)
 eval_instances = build_instances(eval_users)
-print(f"Prepared {len(eval_instances):,} instances")
+log(f"Prepared {len(eval_instances):,} instances | RAM {mem_info()}")
 TEST_N = 5000
 test_inst = eval_instances[:TEST_N]
 train_for_fit = eval_instances[TEST_N:TEST_N + 100000]
@@ -216,6 +236,7 @@ loader_tt = DataLoader(ds_tt, batch_size=512, shuffle=True, num_workers=0)
 opt_tt = torch.optim.Adam(list(user_tower.parameters()) + list(item_tower.parameters()), lr=1e-3, weight_decay=1e-5)
 bce_tt = nn.BCEWithLogitsLoss()
 user_tower.train(); item_tower.train()
+_t_train = time.time()
 for ep in range(30):
     tot = 0.0
     for bu, bi, by in loader_tt:
@@ -226,7 +247,8 @@ for ep in range(30):
         loss = bce_tt(score, by)
         opt_tt.zero_grad(); loss.backward(); opt_tt.step()
         tot += loss.item()
-    print(f"TwoTower Epoch {ep+1}/30 Loss: {tot/len(loader_tt):.4f}")
+    if (ep+1)%5==0 or ep==0 or ep==29: log(f"[TRAIN] TwoTower Epoch {ep+1}/30 Loss: {tot/len(loader_tt):.4f} | {time.time()-_t_train:.1f}s | {gpu_mem()}")
+log(f"[TRAIN] Training done in {time.time()-_t_train:.1f}s")
 torch.save({"user": user_tower.state_dict(), "item": item_tower.state_dict()}, OUT_DIR / "two_tower_fusion.pt")
 
 # Eval — batched: B users go through the item tower in ONE forward pass
@@ -268,10 +290,10 @@ def eval_two_tower(instances, batch_users=EVAL_BATCH_USERS):
 
 
 res_tt = eval_two_tower(test_inst)
-print("Two-Tower:", res_tt)
+log(f"[RESULT] Two-Tower: {res_tt}")
 
 summary = {"model": "two_tower", "n_eval_users": len(test_inst), "two_tower": res_tt}
 (OUT_DIR / "two_tower_summary.json").write_text(json.dumps(summary, indent=2))
 print(json.dumps(summary, indent=2))
-print("DONE", flush=True)
+log(f"DONE in {time.time()-_T0:.1f}s | RAM {mem_info()} | {gpu_mem()}")
 print("[ARTIFACT SAVED]", flush=True)

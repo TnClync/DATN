@@ -27,6 +27,26 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EVAL_BATCH_USERS = 64    # eval: self-attention is O(C^2), keep the batch smaller
 
+_T0 = time.time()
+
+def log(msg: str):
+    print(f"[{time.strftime('%H:%M:%S')} +{time.time() - _T0:7.1f}s] {msg}", flush=True)
+
+def mem_info() -> str:
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return f"{rss / 1e9:.1f} GB" if rss > 1e9 else f"{rss / 1e6:.1f} MB"
+    except Exception:
+        return "n/a"
+
+def gpu_mem() -> str:
+    if not torch.cuda.is_available():
+        return "CPU"
+    return " | ".join(f"GPU{i} alloc={torch.cuda.memory_allocated(i)/1e9:.1f}G res={torch.cuda.memory_reserved(i)/1e9:.1f}G" for i in range(torch.cuda.device_count()))
+
+log(f"CONFIG: DEVICE={DEVICE} EVAL_BATCH_USERS={EVAL_BATCH_USERS} | {gpu_mem()}")
+
 
 def find_base_dir():
     for c in [Path("/kaggle/input/lastone/amazon_recs_output"), Path("/kaggle/input/lastone"),
@@ -174,7 +194,7 @@ test_users = np.array([u for u in user_gt.keys() if user_inter_count[u] >= MIN_I
 test_users = np.array([u for u in test_users if any(it < SBERT_COVERAGE for it in user_gt[u])])
 eval_users = np.random.default_rng(42).choice(test_users, size=min(50000, len(test_users)), replace=False)
 eval_instances = build_instances(eval_users)
-print(f"Prepared {len(eval_instances):,} instances")
+log(f"Prepared {len(eval_instances):,} instances | RAM {mem_info()}")
 TEST_N = 5000
 test_inst = eval_instances[:TEST_N]
 train_for_fit = eval_instances[TEST_N:TEST_N + 20000]
@@ -217,6 +237,7 @@ bce_tf = nn.BCEWithLogitsLoss()
 transformer.train()
 batch_users = 16
 n_tf = len(tf_cands)
+_t_train = time.time()
 for ep in range(10):
     perm = np.random.default_rng(SEED + ep).permutation(n_tf)
     tot = 0.0
@@ -232,7 +253,8 @@ for ep in range(10):
         opt_tf.zero_grad(); loss.backward(); opt_tf.step()
         tot += loss.item()
         nb += 1
-    print(f"Transformer Epoch {ep+1}/10 Loss: {tot/max(1,nb):.4f}")
+    if (ep+1)%2==0 or ep==0 or ep==9: log(f"[TRAIN] Transformer Epoch {ep+1}/10 Loss: {tot/max(1,nb):.4f} | {time.time()-_t_train:.1f}s | {gpu_mem()}")
+log(f"[TRAIN] Training done in {time.time()-_t_train:.1f}s")
 torch.save(transformer.state_dict(), OUT_DIR / "transformer_fusion.pt")
 
 # Eval — batched: B users x C candidates as ONE (B, C, dim) tensor.
@@ -281,5 +303,5 @@ print("Transformer Fusion:", res_tf)
 summary = {"model": "transformer", "n_eval_users": len(test_inst), "transformer_fusion": res_tf}
 (OUT_DIR / "transformer_summary.json").write_text(json.dumps(summary, indent=2))
 print(json.dumps(summary, indent=2))
-print("DONE", flush=True)
+log(f"DONE in {time.time()-_T0:.1f}s | RAM {mem_info()} | {gpu_mem()}")
 print("[ARTIFACT SAVED]", flush=True)

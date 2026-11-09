@@ -26,6 +26,26 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EVAL_BATCH_USERS = 128   # eval: fuse this many users in ONE forward pass
 
+_T0 = time.time()
+
+def log(msg: str):
+    print(f"[{time.strftime('%H:%M:%S')} +{time.time() - _T0:7.1f}s] {msg}", flush=True)
+
+def mem_info() -> str:
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return f"{rss / 1e9:.1f} GB" if rss > 1e9 else f"{rss / 1e6:.1f} MB"
+    except Exception:
+        return "n/a"
+
+def gpu_mem() -> str:
+    if not torch.cuda.is_available():
+        return "CPU"
+    return " | ".join(f"GPU{i} alloc={torch.cuda.memory_allocated(i)/1e9:.1f}G res={torch.cuda.memory_reserved(i)/1e9:.1f}G" for i in range(torch.cuda.device_count()))
+
+log(f"CONFIG: MIN_INTERACTIONS={MIN_INTERACTIONS} EVAL_BATCH_USERS={EVAL_BATCH_USERS} DEVICE={DEVICE} | {gpu_mem()}")
+
 
 def find_base_dir():
     for c in [Path("/kaggle/input/lastone/amazon_recs_output"), Path("/kaggle/input/lastone"),
@@ -194,7 +214,7 @@ test_users = np.array([u for u in user_gt.keys() if user_inter_count[u] >= MIN_I
 test_users = np.array([u for u in test_users if any(it < SBERT_COVERAGE for it in user_gt[u])])
 eval_users = np.random.default_rng(42).choice(test_users, size=min(50000, len(test_users)), replace=False)
 eval_instances = build_instances(eval_users)
-print(f"Prepared {len(eval_instances):,} instances")
+log(f"Prepared {len(eval_instances):,} instances | RAM {mem_info()}")
 TEST_N = 5000
 test_inst = eval_instances[:TEST_N]
 val_inst = eval_instances[TEST_N:TEST_N + 2000]
@@ -216,11 +236,11 @@ def eval_scorer(fn, instances):
 # ---- Baselines ----
 print("\n[STEP 5/8] BASELINES")
 res_als = eval_scorer(lambda u, c: cf_scores(user_cf, item_cf, u, c), test_inst)
-print("ALS:", res_als)
+log(f"[BASELINE] ALS: {res_als}")
 res_graph_cf = eval_scorer(lambda u, c: cf_scores(graph_user, graph_item, u, c), test_inst)
 print("LightGCN:", res_graph_cf)
 res_sbert = eval_scorer(lambda u, c: sb_scores(u, c), test_inst)
-print("SBERT:", res_sbert)
+log(f"[BASELINE] SBERT: {res_sbert}")
 
 
 # ---- Model: Graph Light Gated ----
@@ -258,6 +278,7 @@ loader = DataLoader(ds, batch_size=512, shuffle=True, num_workers=0)
 opt = torch.optim.Adam(gate.parameters(), lr=1e-3, weight_decay=1e-5)
 bce = nn.BCEWithLogitsLoss()
 gate.train()
+_t_train = time.time()
 for ep in range(30):
     tot = 0.0
     for bu, bi, bs, bcf, bsb, by in loader:
@@ -267,7 +288,8 @@ for ep in range(30):
         loss = bce(pred, by)
         opt.zero_grad(); loss.backward(); opt.step()
         tot += loss.item()
-    print(f"Gate Epoch {ep+1}/30 Loss: {tot/len(loader):.4f}")
+    if (ep+1)%5==0 or ep==0 or ep==29: log(f"[TRAIN] Gate Epoch {ep+1}/30 Loss: {tot/len(loader):.4f} | {time.time()-_t_train:.1f}s | {gpu_mem()}")
+log(f"[TRAIN] Training done in {time.time()-_t_train:.1f}s")
 torch.save(gate.state_dict(), OUT_DIR / "graph_light_gated_fusion.pt")
 
 
@@ -322,7 +344,7 @@ def eval_gate(instances, batch_users=EVAL_BATCH_USERS):
 
 
 res_gate = eval_gate(test_inst)
-print("Graph Light Gated:", res_gate)
+log(f"[RESULT] Graph Light Gated: {res_gate}")
 
 summary = {
     "model": "graph_light_gated",
@@ -335,5 +357,5 @@ summary = {
 }
 (OUT_DIR / "graph_light_gated_summary.json").write_text(json.dumps(summary, indent=2))
 print(json.dumps(summary, indent=2))
-print("DONE", flush=True)
+log(f"DONE in {time.time()-_T0:.1f}s | RAM {mem_info()} | {gpu_mem()}")
 print("[ARTIFACT SAVED]", flush=True)

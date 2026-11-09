@@ -22,6 +22,24 @@ import torch.nn as nn
 from scipy.sparse import csr_matrix, coo_matrix
 from tqdm import tqdm
 
+_T0 = time.time()
+
+def log(msg: str):
+    print(f"[{time.strftime('%H:%M:%S')} +{time.time() - _T0:7.1f}s] {msg}", flush=True)
+
+def mem_info() -> str:
+    try:
+        import resource
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return f"{rss / 1e9:.1f} GB" if rss > 1e9 else f"{rss / 1e6:.1f} MB"
+    except Exception:
+        return "n/a"
+
+def gpu_mem() -> str:
+    if not torch.cuda.is_available():
+        return "CPU"
+    return " | ".join(f"GPU{i} alloc={torch.cuda.memory_allocated(i)/1e9:.1f}G" for i in range(torch.cuda.device_count()))
+
 MIN_INTERACTIONS = 3
 CATALOG = 200_000
 SEED = 42
@@ -29,7 +47,8 @@ GRAPH_DIM = 32
 N_EPOCHS = 50
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-DEVICE = torch.device("cpu")  # LightGCN on CPU to avoid OOM
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+log(f"DEVICE={DEVICE} | GRAPH_DIM={GRAPH_DIM} N_EPOCHS={N_EPOCHS} | {gpu_mem()} | RAM {mem_info()}")
 
 
 def find_base_dir():
@@ -62,7 +81,7 @@ i_raw = train_df["item_idx"].to_numpy(np.int64)
 u_uniq, u_inv = np.unique(u_raw, return_inverse=True)
 i_uniq, i_inv = np.unique(i_raw, return_inverse=True)
 n_users, n_items = len(u_uniq), len(i_uniq)
-print(f"Compact: {n_users:,} users x {n_items:,} items")
+log(f"[STEP 1] Loaded train: {n_users:,} users x {n_items:,} items, {len(train_df):,} interactions | RAM {mem_info()}")
 
 # ---- Build graph ----
 src = u_inv.astype(np.int64)
@@ -86,6 +105,7 @@ pos_edges = list(zip(u_inv.tolist(), i_inv.tolist()))
 pos_set = set(pos_edges)
 n_edges = len(pos_edges)
 rng = np.random.default_rng(SEED)
+log(f"[STEP 2] Graph built: {N_nodes:,} nodes, {adj_sparse._nnz():,} nonzero | {gpu_mem()} | RAM {mem_info()}")
 
 # ---- LightGCN ----
 torch.manual_seed(SEED)
@@ -97,6 +117,8 @@ optimizer = torch.optim.Adam(E0.parameters(), lr=0.01)
 E0.train()
 batch_size = 4096
 epoch_edges = min(500_000, n_edges)
+log(f"[STEP 3] Training LightGCN: N_EPOCHS={N_EPOCHS} epoch_edges={epoch_edges:,} batch_size={batch_size}")
+t_train = time.time()
 for epoch in range(N_EPOCHS):
     perm = rng.choice(n_edges, size=epoch_edges, replace=False)
     total_loss = 0.0
@@ -132,8 +154,11 @@ for epoch in range(N_EPOCHS):
         optimizer.step()
         total_loss += loss.item()
         n_batches += 1
-    print(f"[STEP] LightGCN Epoch {epoch+1}/{N_EPOCHS} Loss: {total_loss/max(1,n_batches):.4f}", flush=True)
+    avg = total_loss / max(1, n_batches)
+    if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == N_EPOCHS - 1:
+        log(f"[STEP 3] Epoch {epoch+1:>3}/{N_EPOCHS} loss={avg:.4f} | {time.time()-t_train:.1f}s elapsed | {gpu_mem()}")
 
+log(f"[STEP 3] Training finished in {time.time()-t_train:.1f}s")
 with torch.no_grad():
     E = E0.weight
     E_list = [E]
@@ -145,9 +170,11 @@ with torch.no_grad():
 graph_user = E_final[:n_users].astype(np.float32)
 graph_item = E_final[n_users:].astype(np.float32)
 
+log("[STEP 4] Saving artifacts...")
 np.save(OUT_DIR / "graph_user_factors_f16.npy", graph_user.astype(np.float16))
 np.save(OUT_DIR / "graph_item_factors_f16.npy", graph_item.astype(np.float16))
 np.save(OUT_DIR / "user_ids.npy", u_uniq)
 np.save(OUT_DIR / "item_ids.npy", i_uniq)
-print(f"[ARTIFACT SAVED] graph_user {graph_user.shape}, graph_item {graph_item.shape}")
-print("DONE")
+log(f"[ARTIFACT SAVED] graph_user {graph_user.shape}, graph_item {graph_item.shape} -> {OUT_DIR}")
+log(f"DONE in {time.time()-_T0:.1f}s | RAM {mem_info()}")
+print("DONE", flush=True)
