@@ -101,45 +101,54 @@ def resolve_customer(customer_input: str | int | None, user_idx_input: int | Non
     return "A37OJC78HSOXXN", 5, "Warm-Start"
 
 
-def get_item_metadata(item_idx: int) -> dict[str, Any]:
-    # item_idx here is a COMPACT row index. Map to original item id first.
-    orig_idx = item_idx
+_ITEM_IDS_CACHE = None
+
+def _orig_item_idx(item_idx: int) -> int:
+    global _ITEM_IDS_CACHE
     try:
-        ids = np.load(ARTIFACTS_DIR / "factors" / "als_item_ids.npy")
+        if _ITEM_IDS_CACHE is None:
+            _ITEM_IDS_CACHE = np.load(ARTIFACTS_DIR / "factors" / "als_item_ids.npy", mmap_mode="r")
+        ids = _ITEM_IDS_CACHE
         if 0 <= item_idx < len(ids):
-            orig_idx = int(ids[item_idx])
+            return int(ids[item_idx])
     except Exception:
         pass
-    # Real metadata from SQLite DB (built from nguynteo/item-profile). No fabrication.
+    return int(item_idx)
+
+
+def get_item_metadata(item_idx: int) -> dict[str, Any]:
+    # item_idx is a COMPACT row index. Map to original item id first.
+    orig_idx = _orig_item_idx(item_idx)
+    # Real metadata from SQLite DB (built from raw nguynteo/item-profile). No fabrication.
     try:
         conn = sqlite3.connect(str(ARTIFACTS_DIR / "item_metadata.db"))
-        row = conn.execute(
-            "SELECT asin, title, brand, category, price, description FROM items WHERE item_idx = ?",
-            (orig_idx,),
-        ).fetchone()
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM items WHERE item_idx = ?", (orig_idx,)).fetchone()
         conn.close()
         if row:
-            asin, title, brand, category, price, description = row
-            return {
-                "item_idx": item_idx,
-                "asin": asin or "",
-                "title": title or f"Item {item_idx}",
-                "brand": brand or "",
-                "category": category or "",
-                "price": price or "",
-                "description": (description or "")[:200],
-                "in_stock": True,
-            }
+            meta = {k: ("" if row[k] is None else row[k]) for k in row.keys()}
+            meta["item_idx"] = int(item_idx)          # compact id (used by app/models)
+            meta["orig_item_idx"] = int(orig_idx)     # original catalog id
+            if not meta.get("title"):
+                meta["title"] = f"Item {item_idx}"
+            meta.setdefault("in_stock", True)
+            return meta
     except Exception:
         pass
     return {
-        "item_idx": item_idx,
+        "item_idx": int(item_idx),
+        "orig_item_idx": int(orig_idx),
         "asin": str(orig_idx),
         "title": f"Item {item_idx}",
         "brand": "",
         "category": "",
         "price": "",
         "description": "",
+        "feature": "",
+        "also_buy": "",
+        "also_view": "",
+        "metadata_source": "",
+        "product_text": "",
         "in_stock": True,
     }
 

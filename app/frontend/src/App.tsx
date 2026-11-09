@@ -422,31 +422,45 @@ export default function App() {
         )}
       </main>
 
-      {selectedItem && (
+      {selectedItem && (() => {
+        const primary = ['brand','category','price','asin','metadata_source','feature'];
+        const longFields = ['description','also_buy','also_view','product_text'];
+        const skip = new Set(['item_idx','orig_item_idx','title','in_stock', ...primary, ...longFields]);
+        const extra = Object.keys(selectedItem || {}).filter(k => !skip.has(k) && selectedItem[k] != null && String(selectedItem[k]).trim() !== '');
+        const fmt = (v: any) => { const s = String(v ?? ''); return s.length > 1200 ? s.slice(0, 1200) + '…' : s; };
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedItem(null)}>
-          <div className={`${card} border rounded-xl max-w-lg w-full p-5`} onClick={e => e.stopPropagation()}>
+          <div className={`${card} border rounded-xl max-w-2xl w-full p-5 max-h-[85vh] overflow-y-auto`} onClick={e => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3 mb-3">
-              <h3 className="text-lg font-bold">{selectedItem.title || `Item ${selectedItem.item_idx}`}</h3>
+              <div>
+                <h3 className="text-lg font-bold">{selectedItem.title || `Item ${selectedItem.item_idx}`}</h3>
+                <div className={`text-[11px] ${muted}`}>Item ID (compact): {selectedItem.item_idx}{selectedItem.orig_item_idx != null ? ` · Orig ID: ${selectedItem.orig_item_idx}` : ''}</div>
+              </div>
               <button onClick={() => setSelectedItem(null)} className={`px-2 py-1 rounded border ${border} text-sm`}>Close</button>
             </div>
-            <div className="text-sm space-y-1">
+            <div className="text-sm grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
               {selectedItem.brand && <div><span className={muted}>Brand:</span> {selectedItem.brand}</div>}
               {selectedItem.category && <div><span className={muted}>Category:</span> {selectedItem.category}</div>}
               {selectedItem.price && <div><span className={muted}>Price:</span> <span className="text-emerald-600 font-semibold">{selectedItem.price}</span></div>}
               {selectedItem.asin && <div><span className={muted}>ASIN:</span> {selectedItem.asin}</div>}
-              <div><span className={muted}>Item ID:</span> {selectedItem.item_idx}</div>
-              {selectedItem.description && <p className={`mt-2 text-xs ${muted}`}>{String(selectedItem.description).slice(0, 400)}</p>}
+              {selectedItem.metadata_source && <div><span className={muted}>Source:</span> {selectedItem.metadata_source}</div>}
+              {selectedItem.feature && <div className="sm:col-span-2"><span className={muted}>Feature:</span> {fmt(selectedItem.feature)}</div>}
             </div>
+            {selectedItem.description && <div className="mt-3"><div className={`text-xs font-semibold mb-1 ${muted}`}>Description</div><p className={`text-xs whitespace-pre-wrap ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{fmt(selectedItem.description)}</p></div>}
+            {selectedItem.also_buy && <div className="mt-3"><div className={`text-xs font-semibold mb-1 ${muted}`}>Also Buy</div><div className={`text-[11px] font-mono whitespace-pre-wrap break-all ${muted}`}>{fmt(selectedItem.also_buy)}</div></div>}
+            {selectedItem.also_view && <div className="mt-3"><div className={`text-xs font-semibold mb-1 ${muted}`}>Also View</div><div className={`text-[11px] font-mono whitespace-pre-wrap break-all ${muted}`}>{fmt(selectedItem.also_view)}</div></div>}
+            {selectedItem.product_text && <div className="mt-3"><div className={`text-xs font-semibold mb-1 ${muted}`}>Product Text (raw)</div><div className={`text-[11px] font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto p-2 rounded border ${border} ${isDark ? 'bg-slate-800/60' : 'bg-slate-50'}`}>{fmt(selectedItem.product_text)}</div></div>}
+            {extra.length > 0 && <div className="mt-3"><div className={`text-xs font-semibold mb-1 ${muted}`}>Other metadata</div><div className="text-[11px] space-y-0.5">{extra.map(k => <div key={k}><span className={muted}>{k}:</span> <span className="font-mono break-all">{fmt(selectedItem[k])}</span></div>)}</div></div>}
             <div className="flex gap-2 mt-4">
               <button onClick={() => { addToCart(selectedItem); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm">Add to Cart</button>
-              <button onClick={() => toggleWishlist(selectedItem)}
-                className={`px-4 py-2 rounded-lg border ${border} text-sm`}>
+              <button onClick={() => toggleWishlist(selectedItem)} className={`px-4 py-2 rounded-lg border ${border} text-sm`}>
                 {wishlist.has(selectedItem.item_idx) ? 'Remove Wishlist' : 'Add to Wishlist'}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {(showCart || showWishlist) && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => { setShowCart(false); setShowWishlist(false); }}>
