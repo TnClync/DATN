@@ -38,6 +38,7 @@ export default function App() {
   const [sampleUsers, setSampleUsers] = useState<SampleUser[]>([]);
   const [resolvedUser, setResolvedUser] = useState<ResolvedUser | null>(null);
   const [userHistory, setUserHistory] = useState<number[]>([]);
+  const [recError, setRecError] = useState<string | null>(null);
 
   // Simulator
   const [simUsers, setSimUsers] = useState<number>(2000);
@@ -68,13 +69,17 @@ export default function App() {
 
   const fetchRecs = async (cid = customerId, mdl = model, a = alpha) => {
     setIsLoading(true);
+    setRecError(null);
     try {
       const data = await fetchRecommendations({ customer_id: cid, model: mdl, k: topK, alpha: a, history: userHistory });
       setItemsMeta(data.items_meta || []);
       setLatencyMs(data.latency_ms || 0);
       if (data.customer_id) setResolvedUser({ customer_id: data.customer_id, user_idx: data.user_idx, user_status: data.user_status || 'Verified' });
-    } catch (e) { console.error(e); }
-    finally { setIsLoading(false); }
+    } catch (e: any) {
+      console.error(e);
+      setRecError(e?.message || 'Failed to fetch recommendations. Is the API running?');
+      setItemsMeta([]);
+    } finally { setIsLoading(false); }
   };
 
   useEffect(() => { fetchRecs(customerId, model, alpha); }, [customerId, model, topK]);
@@ -168,7 +173,9 @@ export default function App() {
                 <label className="text-xs font-medium text-slate-500 block mb-1">Alpha (CF weight): {Math.round(alpha * 100)}%</label>
                 <input type="range" min="0" max="0.8" step="0.05" value={alpha}
                   onChange={e => { const v = parseFloat(e.target.value); setAlpha(v); fetchRecs(customerId, model, v); }}
-                  className="w-full mb-3" />
+                  className="w-full mb-1" />
+                {model === 'late_fusion' && <div className="text-[10px] text-amber-600 mb-3">Linear α·CF + (1−α)·SBERT. Note: α=1 collapses to pure CF (no fusion).</div>}
+                {model !== 'late_fusion' && <div className="mb-2" />}
                 <label className="text-xs font-medium text-slate-500 block mb-1">Top K: {topK}</label>
                 <input type="range" min="4" max="20" step="2" value={topK}
                   onChange={e => setTopK(Number(e.target.value))}
@@ -177,6 +184,7 @@ export default function App() {
                   className="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
                   {isLoading ? 'Loading...' : 'Get Recommendations'}
                 </button>
+                {recError && <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{recError}</div>}
                 {resolvedUser && (
                   <div className={`mt-3 text-xs ${muted}`}>
                     <div>User: {resolvedUser.customer_id}</div>
@@ -241,26 +249,27 @@ export default function App() {
 
         {activeTab === 'leaderboard' && (
           <div className="space-y-6">
+            <div className={`text-xs ${muted} mb-1`}>Protocol: full test set · 1 positive + 99 negatives · shared 200k catalog · leak-free SBERT · min_interactions=3</div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className={`${card} border rounded-xl p-4`}>
-                <div className="text-xs text-slate-500 mb-1">Top Model</div>
+                <div className="text-xs text-slate-500 mb-1">Best Deep Hybrid (Proposed)</div>
                 <div className="text-lg font-bold text-indigo-600">Light Gated Late Fusion</div>
-                <div className="text-xs text-emerald-600 font-mono mt-1">HR@10: 0.5245 | NDCG@10: 0.3499</div>
+                <div className="text-xs text-emerald-600 font-mono mt-1">HR@10: 0.5245 · NDCG@10: 0.3499</div>
               </div>
               <div className={`${card} border rounded-xl p-4`}>
-                <div className="text-xs text-slate-500 mb-1">Eval Users</div>
-                <div className="text-lg font-bold">299,455</div>
-                <div className="text-xs text-slate-500 font-mono mt-1">Eligible test users · full test set, no sample</div>
+                <div className="text-xs text-slate-500 mb-1">Best Overall (HR@10)</div>
+                <div className="text-lg font-bold text-slate-700">ALS (CF)</div>
+                <div className="text-xs font-mono mt-1">HR@10: 0.6153 · Late Fusion α=1 ≡ ALS (no fusion)</div>
               </div>
               <div className={`${card} border rounded-xl p-4`}>
-                <div className="text-xs text-slate-500 mb-1">Catalog</div>
-                <div className="text-lg font-bold">200,000</div>
-                <div className="text-xs text-slate-500 font-mono mt-1">Shared retrieval catalog · SBERT 200k</div>
+                <div className="text-xs text-slate-500 mb-1">Eval Users / Catalog</div>
+                <div className="text-lg font-bold">299,455 / 200k</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Eligible test users · shared retrieval catalog</div>
               </div>
               <div className={`${card} border rounded-xl p-4`}>
                 <div className="text-xs text-slate-500 mb-1">Min Interactions</div>
                 <div className="text-lg font-bold">≥ 3</div>
-                <div className="text-xs text-slate-500 font-mono mt-1">Train threshold</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Train threshold · 768-d SBERT (meta+reviewer)</div>
               </div>
             </div>
 
@@ -279,8 +288,13 @@ export default function App() {
                   </thead>
                   <tbody className="divide-y divide-slate-200">
                     {sortedLeaderboard.map((row: any, idx: number) => (
-                      <tr key={idx} className={row.best ? 'bg-indigo-50' : ''}>
-                        <td className="py-3 px-4 font-medium">{row.model} {row.best && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1">Top</span>}</td>
+                      <tr key={idx} className={row.bestDeep ? 'bg-indigo-50' : row.bestOverall ? 'bg-slate-50' : ''}>
+                        <td className="py-3 px-4 font-medium">
+                          {row.model}
+                          {row.bestDeep && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1">Proposed (Best Deep Hybrid)</span>}
+                          {row.bestOverall && <span className="text-xs bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded ml-1">Best HR@10</span>}
+                          {row.note && <div className="text-[10px] text-slate-400 font-normal mt-0.5">{row.note}</div>}
+                        </td>
                         <td className="py-3 px-4 text-slate-500 text-xs">{row.type}</td>
                         <td className="py-3 px-4 font-bold text-indigo-600">{row.hr10.toFixed(4)}</td>
                         <td className="py-3 px-4 text-emerald-600">{row.ndcg10.toFixed(4)}</td>
