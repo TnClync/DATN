@@ -9,7 +9,7 @@ import {
   Heart, Filter, ChevronRight, Package, TrendingUp, Cpu, HardDrive, ShieldCheck,
   ArrowUpRight, RefreshCw, Tag, ExternalLink, ThumbsUp, Plus, Info, Check
 } from 'lucide-react';
-import { BENCHMARK_METRICS, PENDING_MODELS } from './data/benchmark';
+import ArchitectureDiagram from './components/ArchitectureDiagram';
 import { fetchSampleUsers, fetchRecommendations, fetchMetrics, runSimulation } from './services/api';
 import type { Product, SampleUser, ResolvedUser, SimResult } from './types';
 
@@ -361,29 +361,8 @@ export default function App() {
         )}
 
         {activeTab === 'architecture' && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            <div className={`${card} border rounded-xl p-6`}>
-              <h3 className="text-lg font-bold mb-2">Architecture & Memory</h3>
-              <p className="text-sm text-slate-500 mb-4">8GB RAM optimized. Factors float16 + mmap. Two-stage retrieval (no full scoring).</p>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
-                  <div className="font-bold">CF Factors</div>
-                  <div className="text-slate-500 text-xs">32-dim float16, mmap</div>
-                </div>
-                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
-                  <div className="font-bold">SBERT</div>
-                  <div className="text-slate-500 text-xs">384-dim, FAISS IndexFlatIP</div>
-                </div>
-                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
-                  <div className="font-bold">Deep Hybrids</div>
-                  <div className="text-slate-500 text-xs">Light Gated, Deep Early (DCN)</div>
-                </div>
-                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
-                  <div className="font-bold">Memory</div>
-                  <div className="text-slate-500 text-xs">&lt; 600MB RAM</div>
-                </div>
-              </div>
-            </div>
+          <div className="max-w-5xl mx-auto">
+            <ArchitectureDiagram isDark={isDark} />
           </div>
         )}
       </main>
