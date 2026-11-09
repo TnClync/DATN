@@ -177,6 +177,22 @@ def health():
     }
 
 
+@app.get("/metrics")
+def metrics():
+    """Latest full-test eval summary for the dashboard."""
+    for p in [
+        ARTIFACTS_DIR / "results" / "latest_eval_summary.json",
+        RESULTS_DIR / "latest_eval_summary.json",
+        Path(__file__).resolve().parents[2] / "docs" / "results" / "latest_eval_summary.json",
+    ]:
+        if p.exists():
+            try:
+                return {"ok": True, "source": str(p), "summary": json.loads(p.read_text())}
+            except Exception as e:
+                return {"ok": False, "error": str(e), "source": str(p)}
+    return {"ok": False, "error": "latest_eval_summary.json not found"}
+
+
 @app.get("/models")
 def models():
     return {

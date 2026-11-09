@@ -39,6 +39,8 @@ export default function App() {
   const [resolvedUser, setResolvedUser] = useState<ResolvedUser | null>(null);
   const [userHistory, setUserHistory] = useState<number[]>([]);
   const [recError, setRecError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [cartCount, setCartCount] = useState<number>(0);
 
   // Simulator
   const [simUsers, setSimUsers] = useState<number>(2000);
@@ -123,13 +125,13 @@ export default function App() {
           </div>
           <div className={`hidden md:flex flex-1 max-w-md items-center gap-2 px-3 py-2 rounded-lg border ${border} ${isDark ? 'bg-slate-900' : 'bg-slate-100'}`}>
             <Search className="h-4 w-4 text-slate-400" />
-            <input className="flex-1 bg-transparent outline-none text-sm" placeholder="Search products..." />
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="flex-1 bg-transparent outline-none text-sm" placeholder="Search recommended products..." />
           </div>
           <div className="flex items-center gap-2">
             <button className={`p-2 rounded-lg border ${border}`}><Heart className="h-5 w-5" /></button>
             <button className={`p-2 rounded-lg border ${border} relative`}>
               <ShoppingCart className="h-5 w-5" />
-              <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">3</span>
+              {cartCount > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">{cartCount}</span>}
             </button>
             <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`p-2 rounded-lg border ${border}`}>
               {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
@@ -211,7 +213,7 @@ export default function App() {
             <section className="lg:col-span-3">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold">Recommended for You</h2>
-                <span className={`text-sm ${muted}`}>{itemsMeta.length} items</span>
+                <span className={`text-sm ${muted}`}>{(searchQuery ? itemsMeta.filter(it => [it.title,it.brand,it.category].join(' ').toLowerCase().includes(searchQuery.toLowerCase())) : itemsMeta).length} items{searchQuery ? ' (filtered)' : ''}</span>
               </div>
               {isLoading ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -225,7 +227,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {itemsMeta.map((item, idx) => (
+                  {(searchQuery ? itemsMeta.filter(it => [it.title,it.brand,it.category].join(' ').toLowerCase().includes(searchQuery.toLowerCase())) : itemsMeta).map((item, idx) => (
                     <div key={item.item_idx} className={`${card} border rounded-xl overflow-hidden hover:shadow-md transition-shadow`}>
                       <div className={`h-36 ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center`}>
                         <Package className="h-12 w-12 text-slate-300" />
@@ -236,7 +238,7 @@ export default function App() {
                         {item.brand && <div className="text-xs text-slate-500 mb-1">{item.brand}</div>}
                         <div className="flex items-center justify-between mt-2">
                           {item.price && <span className="font-bold text-emerald-600">{item.price}</span>}
-                          <button className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
+                          <button onClick={() => setCartCount(c => c + 1)} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
                         </div>
                       </div>
                     </div>
