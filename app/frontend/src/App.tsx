@@ -1,735 +1,289 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Legend, LineChart, Line
+  LineChart, Line
 } from 'recharts';
 import {
-  Sparkles, Cpu, HardDrive, Layers, Database, Activity,
-  Play, RotateCcw, CheckCircle2, ChevronRight, User, ShoppingBag,
-  Sliders, ArrowUpRight, Search, Zap, Award, BarChart3, Clock,
-  Sun, Moon, ArrowUpDown, RefreshCw, Terminal, ShieldCheck,
-  Tag, ExternalLink, ThumbsUp, Plus, Info, Check, Filter
+  Sparkles, Database, User, Sun, Moon, Zap, BarChart3, Layers, Sliders,
+  Award, CheckCircle2, Clock, RotateCcw, Play, ArrowUpDown, Search, ShoppingCart,
+  Heart, Filter, ChevronRight, Package, TrendingUp, Cpu, HardDrive, ShieldCheck,
+  ArrowUpRight, RefreshCw, Tag, ExternalLink, ThumbsUp, Plus, Info, Check
 } from 'lucide-react';
-
-// --- BENCHMARK DATA (100% THỰC NGHIỆM ĐÃ ĐO TRÊN TEST SET - 1 POS + 99 NEGS) ---
 import { BENCHMARK_METRICS, PENDING_MODELS } from './data/benchmark';
+import { fetchSampleUsers, fetchRecommendations, fetchMetrics, runSimulation } from './services/api';
+import type { Product, SampleUser, ResolvedUser, SimResult } from './types';
 
-interface ItemMeta {
-  item_idx: number;
-  asin: string;
-  title: string;
-  brand: string;
-  category: string;
-  price: number;
-  rating: number;
-  reviews_count: number;
-  tags: string[];
-}
+const MODELS = [
+  { id: 'light_gated', name: 'Light Gated Late Fusion', type: 'Deep Hybrid', desc: 'Neural gate learns a per-(user,item) fusion weight' },
+  { id: 'deep_early', name: 'Deep Early Fusion (DCN)', type: 'Deep Hybrid', desc: 'Cross-network over [user_cf, item_cf, item_sbert]' },
+  { id: 'two_stage', name: 'Two-Stage Retrieval', type: 'Deep Hybrid', desc: 'CF + CB Candidate Union -> Reranking' },
+  { id: 'als', name: 'Alternating Least Squares (ALS)', type: 'Collaborative', desc: 'Implicit matrix factorization (factors=32, min_interactions=3)' },
+  { id: 'bpr', name: 'Bayesian Personalized Ranking (BPR)', type: 'Collaborative', desc: 'Pairwise ranking optimization (factors=32, min_interactions=3)' },
+  { id: 'sbert', name: 'SBERT Content-Based', type: 'Content', desc: 'all-MiniLM-L6-v2 + FAISS IndexFlatIP' },
+  { id: 'late_fusion', name: 'Late Fusion (ALS + SBERT)', type: 'Hybrid', desc: 'Linear combination with dynamic weight alpha' },
+];
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [activeTab, setActiveTab] = useState<'playground' | 'leaderboard' | 'architecture' | 'simulator'>('playground');
-
-  // Recommendation parameters
+  const [activeTab, setActiveTab] = useState<'store' | 'leaderboard' | 'simulator' | 'architecture'>('store');
   const [customerId, setCustomerId] = useState<string>('A37OJC78HSOXXN');
-  const [resolvedUser, setResolvedUser] = useState<{
-    customer_id: string;
-    user_idx: number;
-    user_status: string;
-  }>({
-    customer_id: 'A37OJC78HSOXXN',
-    user_idx: 5,
-    user_status: 'Prime VIP'
-  });
   const [model, setModel] = useState<string>('light_gated');
-  const [topK, setTopK] = useState<number>(10);
   const [alpha, setAlpha] = useState<number>(0.65);
-  const [userHistory, setUserHistory] = useState<number[]>([120, 450, 890]);
-
-  // Recommendation query execution
-  const [itemsMeta, setItemsMeta] = useState<ItemMeta[]>([]);
+  const [topK, setTopK] = useState<number>(10);
+  const [itemsMeta, setItemsMeta] = useState<Product[]>([]);
   const [latencyMs, setLatencyMs] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [sampleUsers, setSampleUsers] = useState<any[]>([]);
-
-  // Leaderboard sorting
-  const [sortField, setSortField] = useState<string>('hr10');
-  const [sortAsc, setSortAsc] = useState<boolean>(false);
+  const [sampleUsers, setSampleUsers] = useState<SampleUser[]>([]);
+  const [resolvedUser, setResolvedUser] = useState<ResolvedUser | null>(null);
+  const [userHistory, setUserHistory] = useState<number[]>([]);
 
   // Simulator
   const [simUsers, setSimUsers] = useState<number>(2000);
   const [simNegs, setSimNegs] = useState<number>(99);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
-  const [simProgress, setSimProgress] = useState<number>(100);
-  const [simResults, setSimResults] = useState<any>(null);
+  const [simProgress, setSimProgress] = useState<number>(0);
+  const [simResults, setSimResults] = useState<SimResult | null>(null);
   const [simError, setSimError] = useState<string | null>(null);
 
-  // Load sample users on mount
+  // Leaderboard
+  const [sortField, setSortField] = useState<string>('hr10');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+
+  const isDark = theme === 'dark';
+  const bg = isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900';
+  const card = isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const border = isDark ? 'border-slate-800' : 'border-slate-200';
+
   useEffect(() => {
-    fetch('/users/sample?n=12')
-      .then(res => res.json())
-      .then(d => {
-        if (d.users && d.users.length > 0) {
-          setSampleUsers(d.users);
-          setCustomerId(d.users[0].customer_id);
-        }
-      })
-      .catch(() => {
-        setSampleUsers([
-          { customer_id: 'A37OJC78HSOXXN', user_idx: 5, label: 'A37OJC78HSOXXN', tier: 'Prime VIP', interactions: 34 },
-          { customer_id: 'AMBMXKEZVXZ3Q', user_idx: 7, label: 'AMBMXKEZVXZ3Q', tier: 'Verified Customer', interactions: 28 },
-          { customer_id: 'AFU097OJSAEZS', user_idx: 8, label: 'AFU097OJSAEZS', tier: 'Active Shopper', interactions: 22 },
-          { customer_id: 'AZ0PZ01P37EJD', user_idx: 14, label: 'AZ0PZ01P37EJD', tier: 'Audio & Tech', interactions: 45 },
-          { customer_id: 'AJNGL98FYX97U', user_idx: 24, label: 'AJNGL98FYX97U', tier: 'Smart Home', interactions: 19 },
-          { customer_id: 'A6HDT4BZJGMPS', user_idx: 33, label: 'A6HDT4BZJGMPS', tier: 'Frequent Buyer', interactions: 52 },
-        ]);
-      });
+    fetchSampleUsers(12).then(d => {
+      if (d.users?.length) {
+        setSampleUsers(d.users);
+        setCustomerId(d.users[0].customer_id);
+      }
+    }).catch(() => {});
   }, []);
 
-  // Fetch recommendations whenever user triggers or inputs change
-  const fetchRecommendations = async (targetCid = customerId, targetModel = model, targetAlpha = alpha) => {
+  const fetchRecs = async (cid = customerId, mdl = model, a = alpha) => {
     setIsLoading(true);
     try {
-      const res = await fetch('/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_id: targetCid,
-          model: targetModel,
-          k: topK,
-          alpha: targetAlpha,
-          history: userHistory,
-        })
-      });
-      const data = await res.json();
+      const data = await fetchRecommendations({ customer_id: cid, model: mdl, k: topK, alpha: a, history: userHistory });
       setItemsMeta(data.items_meta || []);
-      setLatencyMs(data.latency_ms || 28);
-      if (data.customer_id) {
-        setResolvedUser({
-          customer_id: data.customer_id,
-          user_idx: data.user_idx,
-          user_status: data.user_status || 'Verified Customer'
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsLoading(false);
-    }
+      setLatencyMs(data.latency_ms || 0);
+      if (data.customer_id) setResolvedUser({ customer_id: data.customer_id, user_idx: data.user_idx, user_status: data.user_status || 'Verified' });
+    } catch (e) { console.error(e); }
+    finally { setIsLoading(false); }
   };
 
-  useEffect(() => {
-    fetchRecommendations(customerId, model, alpha);
-  }, [customerId, model, topK]);
+  useEffect(() => { fetchRecs(customerId, model, alpha); }, [customerId, model, topK]);
 
-  // Simulate user interaction (like / add to history)
-  const addInteraction = (itemIdx: number) => {
-    if (!userHistory.includes(itemIdx)) {
-      const updated = [itemIdx, ...userHistory.slice(0, 7)];
-      setUserHistory(updated);
-      fetchRecommendations(userId, model, alpha);
-    }
-  };
-
-  const runEvalSimulator = async () => {
+  const runSim = async () => {
     setIsSimulating(true);
     setSimError(null);
     setSimResults(null);
     setSimProgress(5);
-    const progressTimer = setInterval(() => {
-      setSimProgress(prev => (prev < 90 ? prev + 3 : prev));
-    }, 200);
+    const t = setInterval(() => setSimProgress(p => (p < 90 ? p + 3 : p)), 200);
     try {
-      const res = await fetch('/simulate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users: simUsers, negatives: simNegs, alpha }),
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      const data = await runSimulation({ users: simUsers, negatives: simNegs, alpha });
       setSimResults(data);
       setSimProgress(100);
     } catch (e: any) {
-      setSimError(e?.message || 'Simulation failed');
+      setSimError(e?.message || 'Failed');
       setSimProgress(0);
     } finally {
-      clearInterval(progressTimer);
+      clearInterval(t);
       setIsSimulating(false);
     }
   };
 
-  const isDark = theme === 'dark';
-  const bgMain = isDark ? 'bg-[#090d16] text-slate-100' : 'bg-slate-50 text-slate-900';
-  const cardBg = isDark ? 'bg-[#0f172a]/80 border-slate-800/80 shadow-xl' : 'bg-white border-slate-200 shadow-md';
-  const borderCol = isDark ? 'border-slate-800' : 'border-slate-200';
-  const textMuted = isDark ? 'text-slate-400' : 'text-slate-500';
-
-  // Sorted leaderboard data
   const sortedLeaderboard = useMemo(() => {
-    return [...BENCHMARK_METRICS].sort((a: any, b: any) => {
-      const vA = a[sortField];
-      const vB = b[sortField];
-      return sortAsc ? vA - vB : vB - vA;
-    });
+    return [...BENCHMARK_METRICS].sort((a: any, b: any) => sortAsc ? a[sortField] - b[sortField] : b[sortField] - a[sortField]);
   }, [sortField, sortAsc]);
 
   const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortField(field);
-      setSortAsc(false);
-    }
+    if (sortField === field) setSortAsc(!sortAsc);
+    else { setSortField(field); setSortAsc(false); }
   };
 
   return (
-    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-300 ${bgMain}`}>
-      
-      {/* GLOWING AMBIENT BACKGROUND (DARK MODE) */}
-      {isDark && (
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl"></div>
-          <div className="absolute top-1/3 -right-40 w-[30rem] h-[30rem] bg-cyan-600/10 rounded-full blur-3xl"></div>
-          <div className="absolute bottom-10 left-1/4 w-[28rem] h-[28rem] bg-fuchsia-600/10 rounded-full blur-3xl"></div>
-        </div>
-      )}
-
-      {/* TOP HEADER */}
-      <header className={`sticky top-0 z-30 border-b backdrop-blur-xl ${isDark ? 'bg-[#090d16]/85 border-slate-800/80' : 'bg-white/90 border-slate-200 shadow-sm'}`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          
-          {/* Logo & Thesis Brand */}
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-cyan-400 p-[1px] shadow-lg shadow-indigo-500/25">
-              <div className="h-full w-full bg-[#090d16] rounded-xl flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-cyan-400" />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-base tracking-tight bg-gradient-to-r from-indigo-400 via-cyan-300 to-white bg-clip-text text-transparent">
-                  HYBRID.REC
-                </h1>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
-                  ĐATN v2.0
-                </span>
-              </div>
-              <p className={`text-[11px] font-medium ${textMuted}`}>
-                Deep Hybrid Recommender System (45.6M Implicit Interactions)
-              </p>
-            </div>
+    <div className={`min-h-screen ${bg}`}>
+      {/* Header */}
+      <header className={`sticky top-0 z-30 border-b ${isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'} backdrop-blur`}>
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 font-extrabold text-lg tracking-tight">
+            <Package className="h-6 w-6 text-indigo-600" />
+            <span>HYBRID.<span className="text-indigo-600">REC</span></span>
           </div>
-
-          {/* System Spec Badges */}
-          <div className="hidden lg:flex items-center gap-2 text-xs font-mono">
-            <div className="px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-slate-300 flex items-center gap-2">
-              <Database className="h-3.5 w-3.5 text-cyan-400" />
-              <span>45.6M Interactions</span>
-            </div>
-            <div className="px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-slate-300 flex items-center gap-2">
-              <User className="h-3.5 w-3.5 text-purple-400" />
-              <span>22M Users × 3.7M Items</span>
-            </div>
-            <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>8GB RAM Optimized</span>
-            </div>
+          <div className={`hidden md:flex flex-1 max-w-md items-center gap-2 px-3 py-2 rounded-lg border ${border} ${isDark ? 'bg-slate-900' : 'bg-slate-100'}`}>
+            <Search className="h-4 w-4 text-slate-400" />
+            <input className="flex-1 bg-transparent outline-none text-sm" placeholder="Search products..." />
           </div>
-
-          {/* Theme & Actions */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className={`p-2 rounded-xl border transition-all ${isDark ? 'bg-slate-900 border-slate-800 text-amber-400 hover:border-slate-700' : 'bg-slate-100 border-slate-300 text-indigo-600'}`}
-              title="Toggle Theme"
-            >
-              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <button className={`p-2 rounded-lg border ${border}`}><Heart className="h-5 w-5" /></button>
+            <button className={`p-2 rounded-lg border ${border} relative`}>
+              <ShoppingCart className="h-5 w-5" />
+              <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">3</span>
+            </button>
+            <button onClick={() => setTheme(isDark ? 'light' : 'dark')} className={`p-2 rounded-lg border ${border}`}>
+              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>
           </div>
         </div>
-
-        {/* NAVIGATION TABS */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-1 -mb-px">
-          {[
-            { id: 'playground', label: '🎯 Studio Gợi Ý Trực Quan', icon: Zap },
-            { id: 'leaderboard', label: '📊 Bảng Xếp Hạng & Metrics (ĐATN)', icon: BarChart3 },
-            { id: 'architecture', label: '🧠 Kiến Trúc & Bộ Nhớ 8GB RAM', icon: Layers },
-            { id: 'simulator', label: '⚡ A/B Simulator (1 Pos + 99 Negs)', icon: Sliders },
-          ].map(tab => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 py-3 px-4 text-xs font-semibold border-b-2 transition-all ${
-                  active
-                    ? 'border-cyan-400 text-cyan-400 bg-cyan-500/5'
-                    : `border-transparent ${textMuted} hover:text-slate-200 hover:border-slate-700`
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {tab.label}
+        <nav className={`border-t ${border}`}>
+          <div className="max-w-7xl mx-auto px-4 flex gap-1">
+            {[
+              { id: 'store', label: 'Storefront' },
+              { id: 'leaderboard', label: 'Benchmarks' },
+              { id: 'simulator', label: 'A/B Simulator' },
+              { id: 'architecture', label: 'Architecture' },
+            ].map(t => (
+              <button key={t.id} onClick={() => setActiveTab(t.id as any)}
+                className={`py-3 px-4 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === t.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-900'
+                }`}>
+                {t.label}
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </nav>
       </header>
 
-      {/* MAIN VIEWPORT */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full relative z-10">
-
-        {/* ========================================================================= */}
-        {/* TAB 1: STUDIO GỢI Ý TRỰC QUAN (PLAYGROUND & INFERENCE)                    */}
-        {/* ========================================================================= */}
-        {activeTab === 'playground' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* LEFT CONTROLS: 4 COLUMNS */}
-            <div className="lg:col-span-4 space-y-5">
-              
-              {/* TARGET CUSTOMER SELECTOR CARD */}
-              <div className={`p-5 rounded-2xl border ${cardBg}`}>
-                <div className="flex items-center justify-between mb-3">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                    <User className="h-4 w-4 text-indigo-400" /> Mã Khách Hàng (customerID)
-                  </label>
-                  <button
-                    onClick={() => {
-                      if (sampleUsers.length > 0) {
-                        const randomUser = sampleUsers[Math.floor(Math.random() * sampleUsers.length)];
-                        setCustomerId(randomUser.customer_id);
-                      }
-                    }}
-                    className="text-[11px] font-mono text-cyan-400 hover:underline flex items-center gap-1"
-                  >
-                    <RefreshCw className="h-3 w-3" /> Ngẫu nhiên
-                  </button>
-                </div>
-
-                {/* Quick Chips with Real Amazon CustomerIDs */}
-                <div className="grid grid-cols-2 gap-2 mb-4">
-                  {sampleUsers.slice(0, 6).map(u => (
-                    <button
-                      key={u.customer_id}
-                      onClick={() => setCustomerId(u.customer_id)}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        customerId === u.customer_id
-                          ? 'bg-gradient-to-r from-indigo-500/20 to-cyan-500/20 border-cyan-400/80 text-cyan-300 shadow-md shadow-cyan-500/10'
-                          : `${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-100 border-slate-200'} ${textMuted} hover:border-slate-700`
-                      }`}
-                    >
-                      <div className="font-mono text-xs font-bold truncate">{u.customer_id}</div>
-                      <div className="text-[10px] truncate opacity-80 flex items-center justify-between mt-0.5">
-                        <span>{u.tier || 'Verified'}</span>
-                        <span className="font-mono text-[9px] text-cyan-400">#{u.user_idx}</span>
-                      </div>
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {activeTab === 'store' && (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Sidebar */}
+            <aside className="lg:col-span-1 space-y-4">
+              <div className={`${card} border rounded-xl p-4`}>
+                <h3 className="text-sm font-bold mb-3">Recommendation Studio</h3>
+                <label className="text-xs font-medium text-slate-500 block mb-1">Customer ID</label>
+                <input value={customerId} onChange={e => setCustomerId(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-lg border ${border} ${isDark ? 'bg-slate-800' : 'bg-slate-50'} text-sm mb-3`} />
+                <label className="text-xs font-medium text-slate-500 block mb-1">Model</label>
+                <select value={model} onChange={e => setModel(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-lg border ${border} ${isDark ? 'bg-slate-800' : 'bg-slate-50'} text-sm mb-3`}>
+                  {MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <label className="text-xs font-medium text-slate-500 block mb-1">Alpha (CF weight): {Math.round(alpha * 100)}%</label>
+                <input type="range" min="0" max="0.8" step="0.05" value={alpha}
+                  onChange={e => { const v = parseFloat(e.target.value); setAlpha(v); fetchRecs(customerId, model, v); }}
+                  className="w-full mb-3" />
+                <label className="text-xs font-medium text-slate-500 block mb-1">Top K: {topK}</label>
+                <input type="range" min="4" max="20" step="2" value={topK}
+                  onChange={e => setTopK(Number(e.target.value))}
+                  className="w-full mb-3" />
+                <button onClick={() => fetchRecs(customerId, model, alpha)}
+                  className="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+                  {isLoading ? 'Loading...' : 'Get Recommendations'}
+                </button>
+                {resolvedUser && (
+                  <div className={`mt-3 text-xs ${muted}`}>
+                    <div>User: {resolvedUser.customer_id}</div>
+                    <div>Status: {resolvedUser.user_status}</div>
+                    <div>Latency: {latencyMs}ms</div>
+                  </div>
+                )}
+              </div>
+              {/* Sample users */}
+              <div className={`${card} border rounded-xl p-4`}>
+                <h3 className="text-sm font-bold mb-2">Sample Users</h3>
+                <div className="space-y-1">
+                  {sampleUsers.slice(0, 6).map((u, i) => (
+                    <button key={i} onClick={() => setCustomerId(u.customer_id)}
+                      className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-slate-100 ${isDark ? 'hover:bg-slate-800' : ''}`}>
+                      {u.label || u.customer_id}
                     </button>
                   ))}
                 </div>
-
-                {/* Custom Customer ID input */}
-                <div className="space-y-1.5">
-                  <div className={`text-[11px] ${textMuted}`}>Nhập Customer ID hoặc User Index:</div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={customerId}
-                      placeholder="VD: A37OJC78HSOXXN hoặc 5"
-                      onChange={e => setCustomerId(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') fetchRecommendations(customerId, model, alpha);
-                      }}
-                      className={`flex-1 rounded-xl px-3 py-2 text-xs font-mono border outline-none ${
-                        isDark ? 'bg-slate-950 border-slate-800 text-slate-100 focus:border-cyan-400' : 'bg-slate-100 border-slate-300 text-slate-900 focus:border-indigo-500'
-                      }`}
-                    />
-                    <button
-                      onClick={() => fetchRecommendations(customerId, model, alpha)}
-                      className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-500/20 transition-all"
-                    >
-                      Gợi Ý
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500 font-mono">
-                    Hỗ trợ Customer ID chuỗi (Amazon review) & số nguyên index.
-                  </p>
-                </div>
               </div>
+            </aside>
 
-              {/* MODEL CONFIGURATION CARD */}
-              <div className={`p-5 rounded-2xl border ${cardBg}`}>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5 mb-3">
-                  <Sliders className="h-4 w-4 text-cyan-400" /> Mô Hình & Trọng Số Alpha
-                </h3>
-
-                {/* Model Select */}
-                <div className="space-y-2 mb-4">
-                  {[
-                    { id: 'late_fusion', name: 'Late Fusion (ALS + SBERT)', badge: 'Đề Xuất Baseline', color: 'text-indigo-400 border-indigo-500/30 bg-indigo-500/10' },
-                    { id: 'light_gated', name: 'Light Gated Late Fusion', badge: 'Neural Gate', color: 'text-amber-400 border-amber-500/30 bg-amber-500/10' },
-                    { id: 'deep_early', name: 'Deep Early Fusion (DCN)', badge: 'Cross Network', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' },
-                    { id: 'two_stage', name: 'Two-Stage Rerank (Deep)', badge: 'SOTA Hybrid', color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10' },
-                    { id: 'als', name: 'ALS Collaborative Filtering', badge: 'implicit 32D', color: 'text-purple-400 border-purple-500/30 bg-purple-500/10' },
-                    { id: 'bpr', name: 'BPR Bayesian Ranking', badge: 'implicit 32D', color: 'text-pink-400 border-pink-500/30 bg-pink-500/10' },
-                    { id: 'sbert', name: 'SBERT Semantic Content', badge: 'FAISS IP', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
-                  ].map(m => (
-                    <div
-                      key={m.id}
-                      onClick={() => setModel(m.id)}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                        model === m.id
-                          ? 'border-cyan-400 bg-cyan-500/10 shadow-sm'
-                          : `${isDark ? 'border-slate-800/80 bg-slate-900/40' : 'border-slate-200 bg-slate-50'} hover:border-slate-700`
-                      }`}
-                    >
-                      <div>
-                        <div className="text-xs font-bold text-slate-200">{m.name}</div>
-                        <div className="text-[10px] text-slate-400">Độ phức tạp O(K log N)</div>
-                      </div>
-                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${m.color}`}>
-                        {m.badge}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Alpha Weight Slider (Only active for late_fusion) */}
-                <div className={`p-4 rounded-xl border space-y-3 ${isDark ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-                  <div className="flex items-center justify-between text-xs font-medium">
-                    <span className="text-indigo-400 font-bold">CF Weight: {Math.round(alpha * 100)}%</span>
-                    <span className="text-cyan-400 font-bold">SBERT Weight: {Math.round((1 - alpha) * 100)}%</span>
-                  </div>
-
-                  <input
-                    type="range"
-                    min="0"
-                    max="0.8"
-                    step="0.05"
-                    value={alpha}
-                    onChange={e => {
-                      const newAlpha = parseFloat(e.target.value);
-                      setAlpha(newAlpha);
-                      if (model === 'late_fusion') {
-                        fetchRecommendations(userId, model, newAlpha);
-                      }
-                    }}
-                    className="w-full accent-cyan-400 h-2 bg-slate-800 rounded-lg cursor-pointer"
-                  />
-
-                  {/* Gradient Fusion Visualizer Bar */}
-                  <div className="w-full h-2 rounded-full overflow-hidden flex">
-                    <div className="bg-indigo-500 h-full transition-all duration-200" style={{ width: `${alpha * 100}%` }} />
-                    <div className="bg-cyan-400 h-full transition-all duration-200" style={{ width: `${(1 - alpha) * 100}%` }} />
-                  </div>
-                  <div className={`text-[10px] flex justify-between font-mono ${textMuted}`}>
-                    <span>Hành vi tương tác quá khứ</span>
-                    <span>Ngữ nghĩa nội dung</span>
-                  </div>
-                </div>
-
-                {/* Top-K Selector */}
-                <div className="mt-4 flex items-center justify-between">
-                  <span className="text-xs text-slate-300 font-medium">Số lượng Top-K:</span>
-                  <div className="flex gap-1">
-                    {[5, 10, 15, 20].map(kVal => (
-                      <button
-                        key={kVal}
-                        onClick={() => setTopK(kVal)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all ${
-                          topK === kVal
-                            ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                            : 'bg-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {kVal}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            {/* Product grid */}
+            <section className="lg:col-span-3">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold">Recommended for You</h2>
+                <span className={`text-sm ${muted}`}>{itemsMeta.length} items</span>
               </div>
-
-              {/* SIMULATED USER HISTORY */}
-              <div className={`p-4 rounded-2xl border ${cardBg}`}>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5 text-purple-400" /> Lịch Sử Tương Tác Gần Đây
-                  </h4>
-                  <span className="text-[10px] text-purple-400 font-mono">{userHistory.length} items</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {userHistory.map((itemIdx, idx) => (
-                    <span
-                      key={idx}
-                      className="text-[11px] font-mono px-2 py-1 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300 flex items-center gap-1"
-                    >
-                      #{itemIdx}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-            </div>
-
-            {/* RIGHT CONTENT: 8 COLUMNS - RECOMMENDATION RESULTS */}
-            <div className="lg:col-span-8 space-y-5">
-              
-              {/* TOP STATUS BANNER */}
-              <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 ${cardBg}`}>
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-cyan-500/20 to-indigo-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-                    <Award className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-slate-100 font-mono">
-                        {resolvedUser.customer_id}
-                      </h3>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                        {resolvedUser.user_status}
-                      </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                        Index #{resolvedUser.user_idx}
-                      </span>
-                    </div>
-                    <p className={`text-xs mt-0.5 ${textMuted}`}>
-                      Mô hình <strong className="text-cyan-400 font-mono">{model.toUpperCase()}</strong> | Tìm thấy {itemsMeta.length} sản phẩm tối ưu trong 3.69M catalog
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <div className="text-[10px] uppercase font-mono text-slate-400">Độ Trễ Suy Luận</div>
-                    <div className="text-xs font-bold font-mono text-emerald-400">{latencyMs} ms</div>
-                  </div>
-                  <button
-                    onClick={() => fetchRecommendations(customerId, model, alpha)}
-                    disabled={isLoading}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all border border-slate-700 disabled:opacity-50"
-                    title="Làm mới kết quả"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-cyan-400' : ''}`} />
-                  </button>
-                </div>
-              </div>
-
-              {/* PRODUCT CARDS GRID */}
               {isLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[...Array(6)].map((_, i) => (
-                    <div key={i} className={`p-4 rounded-2xl border animate-pulse ${cardBg}`}>
-                      <div className="h-4 bg-slate-800 rounded w-1/3 mb-3"></div>
-                      <div className="h-5 bg-slate-800 rounded w-3/4 mb-2"></div>
-                      <div className="h-4 bg-slate-800 rounded w-1/2 mb-4"></div>
-                      <div className="h-10 bg-slate-800 rounded w-full"></div>
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className={`${card} border rounded-xl p-4 animate-pulse`}>
+                      <div className="h-32 bg-slate-200 rounded-lg mb-3" />
+                      <div className="h-4 bg-slate-200 rounded mb-2" />
+                      <div className="h-3 bg-slate-200 rounded w-2/3" />
                     </div>
                   ))}
-                </div>
-              ) : itemsMeta.length === 0 ? (
-                <div className={`p-12 rounded-2xl border text-center ${cardBg}`}>
-                  <ShoppingBag className="h-10 w-10 text-slate-600 mx-auto mb-3" />
-                  <p className="text-sm font-bold text-slate-300">Không có dữ liệu gợi ý</p>
-                  <p className={`text-xs mt-1 ${textMuted}`}>Vui lòng nhấn nút "Tìm" hoặc chọn người dùng khác.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {itemsMeta.map((item, index) => {
-                    const isTop1 = index === 0;
-                    const isTop2 = index === 1;
-                    const isTop3 = index === 2;
-                    const rankBadgeColor = isTop1
-                      ? 'bg-amber-400/20 text-amber-300 border-amber-400/40'
-                      : isTop2
-                      ? 'bg-slate-300/20 text-slate-200 border-slate-300/40'
-                      : isTop3
-                      ? 'bg-amber-700/20 text-amber-500 border-amber-600/40'
-                      : 'bg-slate-800/60 text-slate-400 border-slate-700';
-
-                    return (
-                      <div
-                        key={item.item_idx}
-                        className={`glass-card glass-card-hover p-4 rounded-2xl flex flex-col justify-between relative group ${
-                          isTop1 ? 'border-indigo-500/40 shadow-glow' : ''
-                        }`}
-                      >
-                        {/* Rank Badge */}
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <span className={`text-[10px] font-mono font-extrabold px-2 py-0.5 rounded-md border ${rankBadgeColor}`}>
-                            TOP #{index + 1}
-                          </span>
-                          <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 border border-cyan-800/60 px-2 py-0.5 rounded">
-                            {item.asin}
-                          </span>
-                        </div>
-
-                        {/* Title & Brand */}
-                        <div className="space-y-1 mb-3">
-                          <div className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide">
-                            {item.category}
-                          </div>
-                          <h4 className="text-sm font-bold text-slate-100 group-hover:text-cyan-300 transition-colors line-clamp-2 leading-snug">
-                            {item.title}
-                          </h4>
-                          <div className="flex items-center gap-2 text-xs pt-1 flex-wrap">
-                            {item.rating ? (
-                              <span className="text-amber-400 font-bold flex items-center gap-1">
-                                ★ {item.rating}
-                              </span>
-                            ) : null}
-                            {item.reviews_count ? (
-                              <span className={`text-[11px] ${textMuted}`}>
-                                ({Number(item.reviews_count).toLocaleString()} đánh giá)
-                              </span>
-                            ) : null}
-                            {item.price ? (
-                              <span className="font-mono font-extrabold text-emerald-400 ml-auto text-sm">
-                                {item.price}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        {/* Tags */}
-                        {Array.isArray(item.tags) && item.tags.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mb-3">
-                          {item.tags.map((tag, tIdx) => (
-                            <span
-                              key={tIdx}
-                              className={`text-[10px] px-2 py-0.5 rounded-md border font-mono ${
-                                isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-600'
-                              }`}
-                            >
-                              #{tag}
-                            </span>
-                          ))}
-                        </div>
-                        )}
-
-                        {/* Recommendation Explanation & Action */}
-                        <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            Affinity: <strong className="text-emerald-400">{(0.98 - index * 0.03).toFixed(3)}</strong>
-                          </span>
-                          <button
-                            onClick={() => addInteraction(item.item_idx)}
-                            className="text-[11px] font-medium text-indigo-400 hover:text-indigo-300 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all"
-                            title="Thêm vào lịch sử đã mua và re-score"
-                          >
-                            <ThumbsUp className="h-3 w-3" /> Like & Học
-                          </button>
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {itemsMeta.map((item, idx) => (
+                    <div key={item.item_idx} className={`${card} border rounded-xl overflow-hidden hover:shadow-md transition-shadow`}>
+                      <div className={`h-36 ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center`}>
+                        <Package className="h-12 w-12 text-slate-300" />
+                      </div>
+                      <div className="p-3">
+                        <div className="text-[10px] font-medium text-indigo-600 uppercase tracking-wide mb-1">{item.category || 'Product'}</div>
+                        <h4 className="text-sm font-semibold line-clamp-2 mb-1">{item.title}</h4>
+                        {item.brand && <div className="text-xs text-slate-500 mb-1">{item.brand}</div>}
+                        <div className="flex items-center justify-between mt-2">
+                          {item.price && <span className="font-bold text-emerald-600">{item.price}</span>}
+                          <button className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               )}
-            </div>
-
+            </section>
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* TAB 2: BẢNG XẾP HẠNG & METRICS (ĐATN)                                     */}
-        {/* ========================================================================= */}
         {activeTab === 'leaderboard' && (
           <div className="space-y-6">
-            
-            {/* SUMMARY CARDS */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className={`p-4 rounded-2xl border ${cardBg}`}>
-                <div className={`text-xs ${textMuted} mb-1 flex items-center justify-between`}>
-                  <span>Top Model Thực Nghiệm</span>
-                  <Award className="h-4 w-4 text-cyan-400" />
-                </div>
-                <div className="text-lg font-extrabold text-cyan-300">Late Fusion (α=1.0)</div>
-                <div className="text-xs text-emerald-400 font-mono mt-1">HR@10: 0.6153 | NDCG@10: 0.4407 (N=299,455)</div>
+              <div className={`${card} border rounded-xl p-4`}>
+                <div className="text-xs text-slate-500 mb-1">Top Model</div>
+                <div className="text-lg font-bold text-indigo-600">Light Gated Late Fusion</div>
+                <div className="text-xs text-emerald-600 font-mono mt-1">HR@10: 0.5245 | NDCG@10: 0.3499</div>
               </div>
-
-              <div className={`p-4 rounded-2xl border ${cardBg}`}>
-                <div className={`text-xs ${textMuted} mb-1 flex items-center justify-between`}>
-                  <span>Implicit ALS CF</span>
-                  <CheckCircle2 className="h-4 w-4 text-indigo-400" />
-                </div>
-                <div className="text-lg font-extrabold text-indigo-300">299,455 Users × 2.46M Items</div>
-                <div className="text-xs text-indigo-400 font-mono mt-1">HR@10: 0.6153 | MRR: 0.3998</div>
+              <div className={`${card} border rounded-xl p-4`}>
+                <div className="text-xs text-slate-500 mb-1">Eval Users</div>
+                <div className="text-lg font-bold">299,455</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Eligible test users</div>
               </div>
-
-              <div className={`p-4 rounded-2xl border ${cardBg}`}>
-                <div className={`text-xs ${textMuted} mb-1 flex items-center justify-between`}>
-                  <span>SBERT Content-Based</span>
-                  <Database className="h-4 w-4 text-purple-400" />
-                </div>
-                <div className="text-lg font-extrabold text-purple-300">all-MiniLM-L6-v2</div>
-                <div className="text-xs text-purple-400 font-mono mt-1">HR@10: 0.1297 | MRR: 0.0662 (N=299,455)</div>
+              <div className={`${card} border rounded-xl p-4`}>
+                <div className="text-xs text-slate-500 mb-1">Catalog</div>
+                <div className="text-lg font-bold">200,000</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Shared items</div>
               </div>
-
-              <div className={`p-4 rounded-2xl border ${cardBg}`}>
-                <div className={`text-xs ${textMuted} mb-1 flex items-center justify-between`}>
-                  <span>Giao Thức Kiểm Thử</span>
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                </div>
-                <div className="text-lg font-extrabold text-emerald-300">1 Pos + 99 Negs</div>
-                <div className="text-xs text-slate-400 font-mono mt-1">Chuẩn Test Set (N=2,000)</div>
+              <div className={`${card} border rounded-xl p-4`}>
+                <div className="text-xs text-slate-500 mb-1">Min Interactions</div>
+                <div className="text-lg font-bold">≥ 3</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Train threshold</div>
               </div>
             </div>
 
-            {/* LEADERBOARD TABLE */}
-            <div className={`rounded-2xl border overflow-hidden ${cardBg}`}>
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                    <BarChart3 className="h-4 w-4 text-indigo-400" /> Bảng Đo Đạc Thực Tế Trên Tập Test
-                  </h3>
-                  <p className={`text-xs ${textMuted}`}>Bấm vào tiêu đề cột để sắp xếp mô hình</p>
-                </div>
-              </div>
-
+            <div className={`${card} border rounded-xl overflow-hidden`}>
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead className={`border-b border-slate-800 text-[11px] uppercase tracking-wider ${isDark ? 'bg-slate-950/80 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                <table className="w-full text-sm">
+                  <thead className={`${isDark ? 'bg-slate-800' : 'bg-slate-100'} text-xs uppercase`}>
                     <tr>
-                      <th className="py-3 px-4">Mô Hình</th>
-                      <th className="py-3 px-4">Kiểu Kiến Trúc</th>
-                      <th className="py-3 px-4 cursor-pointer hover:text-cyan-400" onClick={() => handleSort('hr5')}>
-                        <span className="flex items-center gap-1">HR@5 <ArrowUpDown className="h-3 w-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 cursor-pointer hover:text-cyan-400" onClick={() => handleSort('hr10')}>
-                        <span className="flex items-center gap-1 font-bold text-indigo-400">HR@10 <ArrowUpDown className="h-3 w-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 cursor-pointer hover:text-cyan-400" onClick={() => handleSort('hr20')}>
-                        <span className="flex items-center gap-1">HR@20 <ArrowUpDown className="h-3 w-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 cursor-pointer hover:text-cyan-400" onClick={() => handleSort('ndcg10')}>
-                        <span className="flex items-center gap-1 text-emerald-400 font-bold">NDCG@10 <ArrowUpDown className="h-3 w-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 cursor-pointer hover:text-cyan-400" onClick={() => handleSort('mrr')}>
-                        <span className="flex items-center gap-1 text-pink-400">MRR <ArrowUpDown className="h-3 w-3" /></span>
-                      </th>
-                      <th className="py-3 px-4 text-right">Train Time</th>
+                      <th className="py-3 px-4 text-left">Model</th>
+                      <th className="py-3 px-4 text-left">Type</th>
+                      <th className="py-3 px-4 cursor-pointer" onClick={() => handleSort('hr10')}>HR@10</th>
+                      <th className="py-3 px-4">NDCG@10</th>
+                      <th className="py-3 px-4">MRR</th>
+                      <th className="py-3 px-4 text-right">Time</th>
                     </tr>
                   </thead>
-                  <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
-                    {sortedLeaderboard.map((row, idx) => (
-                      <tr key={idx} className={`transition-colors ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'} ${row.best ? 'bg-indigo-500/5' : ''}`}>
-                        <td className="py-3.5 px-4 font-bold text-slate-200 flex items-center gap-2">
-                          {row.model}
-                          {row.best && (
-                            <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1.5 py-0.5 rounded">
-                              👑 Top 1
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-4 text-slate-400">{row.type}</td>
-                        <td className="py-3.5 px-4">{row.hr5.toFixed(4)}</td>
-                        <td className="py-3.5 px-4 font-bold text-indigo-400">{row.hr10.toFixed(4)}</td>
-                        <td className="py-3.5 px-4">{row.hr20.toFixed(4)}</td>
-                        <td className="py-3.5 px-4 font-bold text-emerald-400">{row.ndcg10.toFixed(4)}</td>
-                        <td className="py-3.5 px-4 text-pink-400">{row.mrr.toFixed(4)}</td>
-                        <td className="py-3.5 px-4 text-right text-slate-400">{row.timeSec}s</td>
+                  <tbody className="divide-y divide-slate-200">
+                    {sortedLeaderboard.map((row: any, idx: number) => (
+                      <tr key={idx} className={row.best ? 'bg-indigo-50' : ''}>
+                        <td className="py-3 px-4 font-medium">{row.model} {row.best && <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1">Top</span>}</td>
+                        <td className="py-3 px-4 text-slate-500 text-xs">{row.type}</td>
+                        <td className="py-3 px-4 font-bold text-indigo-600">{row.hr10.toFixed(4)}</td>
+                        <td className="py-3 px-4 text-emerald-600">{row.ndcg10.toFixed(4)}</td>
+                        <td className="py-3 px-4 text-pink-600">{row.mrr.toFixed(4)}</td>
+                        <td className="py-3 px-4 text-right text-slate-400">{row.timeSec}s</td>
                       </tr>
                     ))}
                   </tbody>
@@ -737,312 +291,106 @@ export default function App() {
               </div>
             </div>
 
-            {/* ROADMAP & PENDING DEEP HYBRIDS TABLE */}
-            <div className={`rounded-2xl border overflow-hidden ${cardBg}`}>
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-amber-400" /> Các Mô Hình Deep Hybrid Kế Tiếp (Theo Đề Cương ĐATN)
-                  </h3>
-                  <p className={`text-xs ${textMuted}`}>Các mô hình đang được chuẩn bị notebook và huấn luyện, chưa đưa số liệu vào bảng chính</p>
-                </div>
+            {PENDING_MODELS.length > 0 && (
+              <div className={`${card} border rounded-xl p-4`}>
+                <h3 className="text-sm font-bold mb-2">Pending Models</h3>
+                {PENDING_MODELS.map((m: any, i: number) => (
+                  <div key={i} className="text-xs text-slate-500 mb-1">{m.model} — {m.status}</div>
+                ))}
               </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead className={`border-b border-slate-800 text-[11px] uppercase tracking-wider ${isDark ? 'bg-slate-950/80 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                    <tr>
-                      <th className="py-3 px-4">Mô Hình Đề Xuất</th>
-                      <th className="py-3 px-4">Độ Ưu Tiên</th>
-                      <th className="py-3 px-4">Kiến Trúc & Phương Pháp</th>
-                      <th className="py-3 px-4 text-right">Trạng Thái Thực Hiện</th>
-                    </tr>
-                  </thead>
-                  <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
-                    {PENDING_MODELS.map((m, idx) => (
-                      <tr key={idx} className={isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}>
-                        <td className="py-3 px-4 font-bold text-slate-300">{m.model}</td>
-                        <td className="py-3 px-4 text-indigo-400">{m.type}</td>
-                        <td className="py-3 px-4 text-slate-400">{m.planned}</td>
-                        <td className="py-3 px-4 text-right">
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                            {m.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* COMPARISON CHARTS */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className={`p-5 rounded-2xl border space-y-4 ${cardBg}`}>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  So Sánh HitRate (HR@5, HR@10, HR@20)
-                </h3>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={sortedLeaderboard} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#1e293b' : '#cbd5e1'} />
-                      <XAxis dataKey="model" stroke="#64748b" fontSize={11} angle={-15} textAnchor="end" />
-                      <YAxis stroke="#64748b" fontSize={11} domain={[0, 1.0]} />
-                      <Tooltip contentStyle={{ backgroundColor: isDark ? '#0f172a' : '#ffffff', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }} />
-                      <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Bar dataKey="hr5" name="HR@5" fill="#38bdf8" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="hr10" name="HR@10" fill="#818cf8" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="hr20" name="HR@20" fill="#c084fc" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className={`p-5 rounded-2xl border space-y-4 ${cardBg}`}>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Chất Lượng Thứ Hạng: NDCG@10 vs MRR
-                </h3>
-                <div className="h-72">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={sortedLeaderboard} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#1e293b' : '#cbd5e1'} />
-                      <XAxis dataKey="model" stroke="#64748b" fontSize={11} angle={-15} textAnchor="end" />
-                      <YAxis stroke="#64748b" fontSize={11} domain={[0, 0.8]} />
-                      <Tooltip contentStyle={{ backgroundColor: isDark ? '#0f172a' : '#ffffff', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }} />
-                      <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Line type="monotone" dataKey="ndcg10" name="NDCG@10" stroke="#34d399" strokeWidth={3} />
-                      <Line type="monotone" dataKey="mrr" name="MRR" stroke="#f472b6" strokeWidth={3} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-
+            )}
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* TAB 3: KIẾN TRÚC & BỘ NHỚ 8GB RAM                                        */}
-        {/* ========================================================================= */}
-        {activeTab === 'architecture' && (
-          <div className="space-y-6">
-            
-            {/* MEMORY BUDGET CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className={`p-4 rounded-2xl border space-y-1 ${cardBg}`}>
-                <div className={`flex items-center justify-between text-xs ${textMuted}`}>
-                  <span>ALS User Factors</span>
-                  <HardDrive className="h-3.5 w-3.5 text-indigo-400" />
-                </div>
-                <div className="text-xl font-bold font-mono text-indigo-300">36.6 MB</div>
-                <div className={`text-[11px] font-mono ${textMuted}`}>300k users × 64 (float16)</div>
-              </div>
-
-              <div className={`p-4 rounded-2xl border space-y-1 ${cardBg}`}>
-                <div className={`flex items-center justify-between text-xs ${textMuted}`}>
-                  <span>ALS Item Factors</span>
-                  <HardDrive className="h-3.5 w-3.5 text-cyan-400" />
-                </div>
-                <div className="text-xl font-bold font-mono text-cyan-300">206.9 MB</div>
-                <div className={`text-[11px] font-mono ${textMuted}`}>1.69M items × 64 (float16)</div>
-              </div>
-
-              <div className={`p-4 rounded-2xl border space-y-1 ${cardBg}`}>
-                <div className={`flex items-center justify-between text-xs ${textMuted}`}>
-                  <span>SBERT FAISS Index</span>
-                  <HardDrive className="h-3.5 w-3.5 text-purple-400" />
-                </div>
-                <div className="text-xl font-bold font-mono text-purple-300">293.0 MB</div>
-                <div className={`text-[11px] font-mono ${textMuted}`}>200k items × 384 dim</div>
-              </div>
-
-              <div className={`p-4 rounded-2xl border space-y-1 ${cardBg}`}>
-                <div className={`flex items-center justify-between text-xs ${textMuted}`}>
-                  <span>Tổng RAM Runtime</span>
-                  <Cpu className="h-3.5 w-3.5 text-emerald-400" />
-                </div>
-                <div className="text-xl font-bold font-mono text-emerald-300">~ 536.5 MB</div>
-                <div className={`text-[11px] font-mono ${textMuted}`}>An Toàn Cho Máy 8GB RAM</div>
-              </div>
-            </div>
-
-            {/* PIPELINE ARCHITECTURE FLOW */}
-            <div className={`p-6 rounded-2xl border space-y-6 ${cardBg}`}>
-              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                <Layers className="h-4 w-4 text-cyan-400" /> Luồng Xử Lý Hệ Thống Deep Hybrid Recommender
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className={`p-4 rounded-xl border space-y-2 ${isDark ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="text-xs font-bold text-indigo-400 flex items-center gap-2">
-                    <span className="h-5 w-5 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px]">1</span>
-                    Stage 1: Candidate Generation
-                  </div>
-                  <p className={`text-xs leading-relaxed ${textMuted}`}>
-                    Lấy Top-200 ứng viên từ <strong>ALS CF</strong> (hành vi tiềm ẩn) kết hợp với Top-200 ứng viên từ <strong>SBERT + FAISS</strong> (ngữ nghĩa nội dung). Hợp nhất (Union) thành tập ứng viên ~300 items.
-                  </p>
-                </div>
-
-                <div className={`p-4 rounded-xl border space-y-2 ${isDark ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="text-xs font-bold text-cyan-400 flex items-center gap-2">
-                    <span className="h-5 w-5 rounded-full bg-cyan-500/20 flex items-center justify-center text-[10px]">2</span>
-                    Stage 2: Fusion & Reranking
-                  </div>
-                  <p className={`text-xs leading-relaxed ${textMuted}`}>
-                    Áp dụng <strong>Late Fusion</strong> (chuẩn hóa điểm min-max + trọng số $\alpha$) hoặc mô hình <strong>Cross-Encoder Reranker</strong> để chấm điểm tương tác sâu giữa hồ sơ người dùng và ứng viên.
-                  </p>
-                </div>
-
-                <div className={`p-4 rounded-xl border space-y-2 ${isDark ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="text-xs font-bold text-emerald-400 flex items-center gap-2">
-                    <span className="h-5 w-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[10px]">3</span>
-                    Stage 3: CPU 8GB RAM Inference
-                  </div>
-                  <p className={`text-xs leading-relaxed ${textMuted}`}>
-                    Sử dụng ma trận dạng <strong>float16</strong> kết hợp <strong>memory-mapping (mmap)</strong>. Toàn bộ quá trình phục vụ suy luận tiêu tốn dưới 600MB RAM với độ trễ phản hồi chỉ từ 25 - 45 ms.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TAB 4: A/B SIMULATOR (1 POS + 99 NEGS)                                    */}
-        {/* ========================================================================= */}
         {activeTab === 'simulator' && (
-          <div className="max-w-4xl mx-auto space-y-6">
-            <div className={`p-6 rounded-2xl border space-y-6 ${cardBg}`}>
-              <div>
-                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2 mb-1">
-                  <Sliders className="h-4 w-4 text-purple-400" /> A/B Testing & Evaluation Simulator
-                </h3>
-                <p className={`text-xs ${textMuted}`}>
-                  Mô phỏng quy trình kiểm thử Leave-One-Out chuẩn học thuật: với mỗi user, chọn 1 tương tác dương (ground-truth) ghép cặp với N items âm ngẫu nhiên.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-300 flex justify-between">
-                    <span>Số Lượng User Kiểm Thử</span>
-                    <span className="text-cyan-400 font-mono">{simUsers} Users</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="500"
-                    max="5000"
-                    step="500"
-                    value={simUsers}
-                    onChange={e => setSimUsers(Number(e.target.value))}
-                    className="w-full accent-cyan-400 h-2 bg-slate-800 rounded-lg cursor-pointer"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-300 flex justify-between">
-                    <span>Số Items Âm (Negative Items)</span>
-                    <span className="text-emerald-400 font-mono">{simNegs} Negatives</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="19"
-                    max="99"
-                    step="20"
-                    value={simNegs}
-                    onChange={e => setSimNegs(Number(e.target.value))}
-                    className="w-full accent-emerald-400 h-2 bg-slate-800 rounded-lg cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              <div className={`p-4 rounded-xl border flex items-center justify-between ${isDark ? 'bg-slate-950/70 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className={`${card} border rounded-xl p-6`}>
+              <h3 className="text-lg font-bold mb-2">A/B Testing Simulator</h3>
+              <p className="text-sm text-slate-500 mb-4">Simulate Leave-One-Out evaluation: 1 positive + N negatives per user.</p>
+              <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
-                  <div className="text-xs font-bold text-slate-200">Tiến Trình Chạy Kiểm Thử</div>
-                  <div className={`text-[11px] ${textMuted}`}>
-                    {isSimulating ? `Đang tính toán ma trận tương quan cho ${simUsers} users...` : 'Sẵn sàng khởi chạy mô phỏng'}
-                  </div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Users: {simUsers}</label>
+                  <input type="range" min="500" max="5000" step="500" value={simUsers} onChange={e => setSimUsers(Number(e.target.value))} className="w-full" />
                 </div>
-                <button
-                  onClick={runEvalSimulator}
-                  disabled={isSimulating}
-                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-500/20 transition-all disabled:opacity-50 flex items-center gap-2"
-                >
-                  {isSimulating ? <RotateCcw className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5 fill-current" />}
-                  {isSimulating ? 'Đang chạy...' : 'Chạy Mô Phỏng'}
-                </button>
+                <div>
+                  <label className="text-xs font-medium text-slate-500 block mb-1">Negatives: {simNegs}</label>
+                  <input type="range" min="19" max="99" step="20" value={simNegs} onChange={e => setSimNegs(Number(e.target.value))} className="w-full" />
+                </div>
               </div>
-
+              <button onClick={runSim} disabled={isSimulating}
+                className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                {isSimulating ? 'Running...' : 'Run Simulation'}
+              </button>
               {isSimulating && (
-                <div className="space-y-2">
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div className="bg-gradient-to-r from-purple-500 to-cyan-400 h-full transition-all duration-300" style={{ width: `${simProgress}%` }}></div>
+                <div className="mt-3">
+                  <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                    <div className="bg-indigo-600 h-full transition-all" style={{ width: `${simProgress}%` }} />
                   </div>
-                  <div className="text-right text-[11px] font-mono text-cyan-400">{simProgress}% Hoàn tất</div>
+                  <div className="text-right text-xs text-slate-500 mt-1">{simProgress}%</div>
                 </div>
               )}
-
-              {simError && (
-                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-mono">
-                  {simError}
-                </div>
-              )}
-
+              {simError && <div className="mt-3 text-sm text-red-600">{simError}</div>}
               {simResults && !isSimulating && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-slate-200">
-                      Kết Quả Mô Phỏng ({simResults.n_users} users × {simResults.negatives} negatives)
-                    </h4>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      α = {simResults.alpha}
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs font-mono">
-                      <thead className={`border-b border-slate-800 text-[11px] uppercase tracking-wider ${isDark ? 'bg-slate-950/80 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
-                        <tr>
-                          <th className="py-2 px-3">Mô Hình</th>
-                          <th className="py-2 px-3">HR@5</th>
-                          <th className="py-2 px-3 font-bold text-indigo-400">HR@10</th>
-                          <th className="py-2 px-3">HR@20</th>
-                          <th className="py-2 px-3 text-emerald-400">NDCG@10</th>
-                          <th className="py-2 px-3 text-pink-400">MRR</th>
+                <div className="mt-4">
+                  <table className="w-full text-sm">
+                    <thead className="border-b">
+                      <tr>
+                        <th className="py-2 px-3 text-left">Model</th>
+                        <th className="py-2 px-3">HR@5</th>
+                        <th className="py-2 px-3">HR@10</th>
+                        <th className="py-2 px-3">NDCG@10</th>
+                        <th className="py-2 px-3">MRR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...simResults.models].sort((a: any, b: any) => b.hr10 - a.hr10).map((row: any, idx: number) => (
+                        <tr key={idx} className={idx === 0 ? 'bg-indigo-50' : ''}>
+                          <td className="py-2 px-3 font-medium">{row.name} {idx === 0 && '🏆'}</td>
+                          <td className="py-2 px-3">{row.hr5.toFixed(4)}</td>
+                          <td className="py-2 px-3 font-bold text-indigo-600">{row.hr10.toFixed(4)}</td>
+                          <td className="py-2 px-3 text-emerald-600">{row.ndcg10.toFixed(4)}</td>
+                          <td className="py-2 px-3 text-pink-600">{row.mrr.toFixed(4)}</td>
                         </tr>
-                      </thead>
-                      <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
-                        {[...simResults.models].sort((a: any, b: any) => b.hr10 - a.hr10).map((row: any, idx: number) => (
-                          <tr key={idx} className={idx === 0 ? 'bg-indigo-500/5' : ''}>
-                            <td className="py-2 px-3 font-bold text-slate-200 flex items-center gap-2">
-                              {row.name}
-                              {idx === 0 && <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1.5 py-0.5 rounded">👑 Top 1</span>}
-                            </td>
-                            <td className="py-2 px-3">{row.hr5.toFixed(4)}</td>
-                            <td className="py-2 px-3 font-bold text-indigo-400">{row.hr10.toFixed(4)}</td>
-                            <td className="py-2 px-3">{row.hr20.toFixed(4)}</td>
-                            <td className="py-2 px-3 text-emerald-400">{row.ndcg10.toFixed(4)}</td>
-                            <td className="py-2 px-3 text-pink-400">{row.mrr.toFixed(4)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
           </div>
         )}
 
+        {activeTab === 'architecture' && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className={`${card} border rounded-xl p-6`}>
+              <h3 className="text-lg font-bold mb-2">Architecture & Memory</h3>
+              <p className="text-sm text-slate-500 mb-4">8GB RAM optimized. Factors float16 + mmap. Two-stage retrieval (no full scoring).</p>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
+                  <div className="font-bold">CF Factors</div>
+                  <div className="text-slate-500 text-xs">32-dim float16, mmap</div>
+                </div>
+                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
+                  <div className="font-bold">SBERT</div>
+                  <div className="text-slate-500 text-xs">384-dim, FAISS IndexFlatIP</div>
+                </div>
+                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
+                  <div className="font-bold">Deep Hybrids</div>
+                  <div className="text-slate-500 text-xs">Light Gated, Deep Early (DCN)</div>
+                </div>
+                <div className={`${isDark ? 'bg-slate-800' : 'bg-slate-50'} rounded-lg p-3`}>
+                  <div className="font-bold">Memory</div>
+                  <div className="text-slate-500 text-xs">&lt; 600MB RAM</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
-      {/* FOOTER */}
-      <footer className={`border-t py-4 text-center text-xs ${borderCol} ${textMuted}`}>
-        <p className="font-mono">
-          HYBRID.REC © 2026 — Đồ Án Tốt Nghiệp Deep Hybrid Recommender System. Triển khai CPU 8GB RAM.
-        </p>
+      <footer className={`border-t py-4 text-center text-xs ${muted}`}>
+        HYBRID.REC © 2026 — Deep Hybrid Recommender System. 8GB RAM CPU Optimized.
       </footer>
-
     </div>
   );
 }

@@ -63,4 +63,3 @@ export interface SimResult {
     mrr: number;
   }[];
 }
-EOF

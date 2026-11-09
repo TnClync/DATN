@@ -537,7 +537,7 @@ print("=" * 50)
 
 
 class LightGate(nn.Module):
-    def __init__(self, in_features=64 + 64 + 768):
+    def __init__(self, in_features=32 + 32 + 768):
         super().__init__()
         self.gate_net = nn.Sequential(
             nn.Linear(in_features, 128), nn.ReLU(), nn.Dropout(0.1),
@@ -615,7 +615,7 @@ print("=" * 50)
 
 
 class UserTower(nn.Module):
-    def __init__(self, in_dim=64, hidden=128, out_dim=64):
+    def __init__(self, in_dim=32, hidden=128, out_dim=32):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(0.1),
                                  nn.Linear(hidden, out_dim))
@@ -625,7 +625,7 @@ class UserTower(nn.Module):
 
 
 class ItemTower(nn.Module):
-    def __init__(self, in_dim=64 + 768, hidden=256, out_dim=64):
+    def __init__(self, in_dim=32 + 768, hidden=256, out_dim=32):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(0.1),
                                  nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(0.1),
@@ -696,7 +696,7 @@ import torch.nn.functional as F
 
 
 class TransformerFusion(nn.Module):
-    def __init__(self, in_dim=64 + 64 + 768, d_model=128, nhead=4, nlayers=2):
+    def __init__(self, in_dim=32 + 32 + 768, d_model=128, nhead=4, nlayers=2):
         super().__init__()
         self.proj = nn.Linear(in_dim, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,

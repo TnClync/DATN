@@ -162,7 +162,7 @@ train_for_fit = eval_instances[TEST_N:TEST_N + 20000]
 # ---- Transformer Fusion ----
 print("\n[STEP 6/8] TRAIN: TRANSFORMER FUSION")
 class TransformerFusion(nn.Module):
-    def __init__(self, in_dim=64 + 64 + 768, d_model=128, nhead=4, nlayers=2):
+    def __init__(self, in_dim=32 + 32 + 768, d_model=128, nhead=4, nlayers=2):
         super().__init__()
         self.proj = nn.Linear(in_dim, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,

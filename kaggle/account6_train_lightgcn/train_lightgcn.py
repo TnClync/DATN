@@ -4,6 +4,7 @@
 Run this BEFORE the graph_* per-model kernels.
 """
 import os, sys, time, json, math, gc, subprocess
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from pathlib import Path
 try:
     import torch, faiss, pyarrow.parquet as pq, implicit, sentence_transformers
@@ -20,11 +21,11 @@ from tqdm import tqdm
 MIN_INTERACTIONS = 3
 CATALOG = 200_000
 SEED = 42
-GRAPH_DIM = 64
+GRAPH_DIM = 32
 N_EPOCHS = 50
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cpu")  # LightGCN on CPU to avoid OOM
 
 
 def find_base_dir():
@@ -91,7 +92,7 @@ E0 = E0.to(DEVICE)
 optimizer = torch.optim.Adam(E0.parameters(), lr=0.01)
 E0.train()
 batch_size = 4096
-epoch_edges = min(1_000_000, n_edges)
+epoch_edges = min(500_000, n_edges)
 for epoch in range(N_EPOCHS):
     perm = rng.choice(n_edges, size=epoch_edges, replace=False)
     total_loss = 0.0
@@ -112,7 +113,7 @@ for epoch in range(N_EPOCHS):
         E = E0.weight
         E_list = [E]
         E_cur = E
-        for _ in range(3):
+        for _ in range(2):
             E_cur = torch.sparse.mm(adj_sparse, E_cur)
             E_list.append(E_cur)
         E_final = torch.stack(E_list).mean(dim=0)
@@ -133,7 +134,7 @@ with torch.no_grad():
     E = E0.weight
     E_list = [E]
     E_cur = E
-    for _ in range(3):
+    for _ in range(2):
         E_cur = torch.sparse.mm(adj_sparse, E_cur)
         E_list.append(E_cur)
     E_final = torch.stack(E_list).mean(dim=0).cpu().numpy()

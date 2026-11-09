@@ -206,7 +206,7 @@ print("SBERT:", res_sbert)
 # ---- Model: Graph Light Gated ----
 print("\n[STEP 6/8] TRAIN: GRAPH LIGHT GATED")
 class LightGate(nn.Module):
-    def __init__(self, in_features=64 + 64 + 768):
+    def __init__(self, in_features=32 + 32 + 768):
         super().__init__()
         self.gate_net = nn.Sequential(
             nn.Linear(in_features, 128), nn.ReLU(), nn.Dropout(0.1),

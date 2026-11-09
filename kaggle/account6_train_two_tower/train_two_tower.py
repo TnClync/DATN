@@ -161,7 +161,7 @@ train_for_fit = eval_instances[TEST_N:TEST_N + 100000]
 # ---- Two-Tower ----
 print("\n[STEP 6/8] TRAIN: TWO-TOWER (graph + sbert)")
 class UserTower(nn.Module):
-    def __init__(self, in_dim=64, hidden=128, out_dim=64):
+    def __init__(self, in_dim=32, hidden=128, out_dim=32):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(0.1),
                                  nn.Linear(hidden, out_dim))
@@ -169,7 +169,7 @@ class UserTower(nn.Module):
         return self.net(x)
 
 class ItemTower(nn.Module):
-    def __init__(self, in_dim=64 + 768, hidden=256, out_dim=64):
+    def __init__(self, in_dim=32 + 768, hidden=256, out_dim=64):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(0.1),
                                  nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(0.1),
