@@ -9,7 +9,7 @@ import {
   Heart, Filter, ChevronRight, Package, TrendingUp, Cpu, HardDrive, ShieldCheck,
   ArrowUpRight, RefreshCw, Tag, ExternalLink, ThumbsUp, Plus, Info, Check
 } from 'lucide-react';
-import ArchitectureDiagram from './components/ArchitectureDiagram';
+import { BENCHMARK_METRICS, PENDING_MODELS } from './data/benchmark';
 import { fetchSampleUsers, fetchRecommendations, fetchMetrics, runSimulation } from './services/api';
 import type { Product, SampleUser, ResolvedUser, SimResult } from './types';
 

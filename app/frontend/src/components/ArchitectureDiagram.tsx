@@ -101,4 +101,3 @@ export default function ArchitectureDiagram({ isDark }: { isDark: boolean }) {
     </div>
   );
 }
-EOF
