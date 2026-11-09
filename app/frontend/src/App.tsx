@@ -22,7 +22,7 @@ const MODELS = [
   { id: 'als', name: 'Alternating Least Squares (ALS)', type: 'Collaborative', desc: 'Implicit matrix factorization (factors=32, min_interactions=3)' },
   { id: 'bpr', name: 'Bayesian Personalized Ranking (BPR)', type: 'Collaborative', desc: 'Pairwise ranking optimization (factors=32, min_interactions=3)' },
   { id: 'sbert', name: 'SBERT Content-Based', type: 'Content', desc: 'all-MiniLM-L6-v2 + FAISS IndexFlatIP' },
-  { id: 'late_fusion', name: 'Late Fusion (ALS + SBERT)', type: 'Hybrid', desc: 'Linear combination with dynamic weight alpha' },
+  { id: 'late_fusion', name: 'Late Fusion (ALS + SBERT)', type: 'Hybrid (α<1)', desc: 'Linear α·CF + (1−α)·SBERT; α=1 collapses to pure CF' },
 ];
 
 export default function App() {
