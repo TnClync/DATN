@@ -14,58 +14,100 @@ import {
 // --- BENCHMARK DATA (100% THỰC NGHIỆM ĐÃ ĐO TRÊN TEST SET - 1 POS + 99 NEGS) ---
 const BENCHMARK_METRICS = [
   {
-    model: 'Late Fusion (ALS + SBERT, α=0.9)',
+    model: 'Late Fusion (ALS + SBERT, α=1.0)',
     type: 'Hybrid Baseline',
-    hr5: 0.7040,
-    hr10: 0.7790,
-    hr20: 0.8335,
-    ndcg5: 0.5937,
-    ndcg10: 0.6181,
-    ndcg20: 0.6319,
-    mrr: 0.5744,
+    hr5: 0.5144,
+    hr10: 0.6153,
+    hr20: 0.7183,
+    ndcg5: 0.4081,
+    ndcg10: 0.4407,
+    ndcg20: 0.4668,
+    mrr: 0.3998,
     timeSec: 1,
     status: 'Verified Test Metric',
     best: true,
   },
   {
-    model: 'ALS (implicit factors=64)',
+    model: 'ALS (implicit factors=32)',
     type: 'Collaborative Filtering',
-    hr5: 0.6938,
-    hr10: 0.7644,
-    hr20: 0.8338,
-    ndcg5: 0.5952,
-    ndcg10: 0.6179,
-    ndcg20: 0.6354,
-    mrr: 0.5798,
-    timeSec: 236,
+    hr5: 0.5144,
+    hr10: 0.6153,
+    hr20: 0.7183,
+    ndcg5: 0.4081,
+    ndcg10: 0.4407,
+    ndcg20: 0.4668,
+    mrr: 0.3998,
+    timeSec: 294,
     status: 'Verified Test Metric',
     best: false,
   },
   {
     model: 'BPR (implicit factors=32)',
     type: 'Collaborative Filtering',
-    hr5: 0.6455,
-    hr10: 0.7265,
-    hr20: 0.7950,
-    ndcg5: 0.5113,
-    ndcg10: 0.5377,
-    ndcg20: 0.5549,
-    mrr: 0.4869,
-    timeSec: 65,
+    hr5: 0.5000,
+    hr10: 0.6144,
+    hr20: 0.7258,
+    ndcg5: 0.3731,
+    ndcg10: 0.4101,
+    ndcg20: 0.4383,
+    mrr: 0.3606,
+    timeSec: 155,
     status: 'Verified Test Metric',
     best: false,
   },
   {
     model: 'SBERT (all-MiniLM-L6-v2)',
     type: 'Content-Based (FAISS)',
-    hr5: 0.0685,
-    hr10: 0.1507,
-    hr20: 0.2466,
-    ndcg5: 0.0381,
-    ndcg10: 0.0637,
-    ndcg20: 0.0888,
-    mrr: 0.0633,
+    hr5: 0.0705,
+    hr10: 0.1297,
+    hr20: 0.2408,
+    ndcg5: 0.0441,
+    ndcg10: 0.0630,
+    ndcg20: 0.0908,
+    mrr: 0.0662,
     timeSec: 35,
+    status: 'Verified Test Metric',
+    best: false,
+  },
+  {
+    model: 'Two-Stage Retrieval (shared 200k catalog)',
+    type: 'Retrieval + Linear Rerank',
+    hr5: 0.0132,
+    hr10: 0.0228,
+    hr20: 0.0378,
+    ndcg5: 0.0083,
+    ndcg10: 0.0114,
+    ndcg20: 0.0151,
+    mrr: 0.0099,
+    timeSec: 1200,
+    status: 'Verified Test Metric (recall@100=6.86%)',
+    best: false,
+  },
+  {
+    model: 'Light Gated Late Fusion',
+    type: 'Deep Hybrid',
+    hr5: 0.4181,
+    hr10: 0.5245,
+    hr20: 0.6376,
+    ndcg5: 0.3154,
+    ndcg10: 0.3499,
+    ndcg20: 0.3784,
+    mrr: 0.3120,
+    timeSec: 1,
+    status: 'Verified Test Metric',
+    best: false,
+  },
+  {
+    model: 'Deep Early Fusion (DCN)',
+    type: 'Deep Hybrid',
+    hr5: 0.3875,
+    hr10: 0.4947,
+    hr20: 0.6083,
+    ndcg5: 0.2871,
+    ndcg10: 0.3217,
+    ndcg20: 0.3504,
+    mrr: 0.2854,
+    timeSec: 1,
     status: 'Verified Test Metric',
     best: false,
   },
@@ -77,18 +119,6 @@ const PENDING_MODELS = [
     type: 'Deep Hybrid (Ưu tiên 1)',
     planned: 'Candidate Union (300) -> bge-reranker-v2-m3 / ms-marco reranking',
     status: 'Đang triển khai notebook trên Kaggle GPU (minhteonguyn)',
-  },
-  {
-    model: 'Light Gated Late Fusion',
-    type: 'Deep Hybrid (Ưu tiên 2)',
-    planned: 'Neural Gate (MLP 2 lớp) học trọng số alpha động theo từng User/Item',
-    status: 'Sắp huấn luyện trên Local CPU',
-  },
-  {
-    model: 'Deep Early Fusion',
-    type: 'Deep Hybrid (Ưu tiên 3)',
-    planned: 'Cross-Network ghép sớm vector nhúng CF và SBERT',
-    status: 'Kế hoạch tiếp theo',
   },
 ];
 
@@ -139,6 +169,8 @@ export default function App() {
   const [simNegs, setSimNegs] = useState<number>(99);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [simProgress, setSimProgress] = useState<number>(100);
+  const [simResults, setSimResults] = useState<any>(null);
+  const [simError, setSimError] = useState<string | null>(null);
 
   // Load sample users on mount
   useEffect(() => {
@@ -207,20 +239,34 @@ export default function App() {
     }
   };
 
-  const runEvalSimulator = () => {
+  const runEvalSimulator = async () => {
     setIsSimulating(true);
-    setSimProgress(0);
-    const step = 25;
-    const interval = setInterval(() => {
-      setSimProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsSimulating(false);
-          return 100;
-        }
-        return prev + step;
+    setSimError(null);
+    setSimResults(null);
+    setSimProgress(5);
+    const progressTimer = setInterval(() => {
+      setSimProgress(prev => (prev < 90 ? prev + 3 : prev));
+    }, 200);
+    try {
+      const res = await fetch('/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: simUsers, negatives: simNegs, alpha }),
       });
-    }, 180);
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setSimResults(data);
+      setSimProgress(100);
+    } catch (e: any) {
+      setSimError(e?.message || 'Simulation failed');
+      setSimProgress(0);
+    } finally {
+      clearInterval(progressTimer);
+      setIsSimulating(false);
+    }
   };
 
   const isDark = theme === 'dark';
@@ -699,8 +745,8 @@ export default function App() {
                   <span>Top Model Thực Nghiệm</span>
                   <Award className="h-4 w-4 text-cyan-400" />
                 </div>
-                <div className="text-lg font-extrabold text-cyan-300">Late Fusion (α=0.9)</div>
-                <div className="text-xs text-emerald-400 font-mono mt-1">HR@10: 0.7790 | NDCG@10: 0.6181</div>
+                <div className="text-lg font-extrabold text-cyan-300">Late Fusion (α=1.0)</div>
+                <div className="text-xs text-emerald-400 font-mono mt-1">HR@10: 0.6153 | NDCG@10: 0.4407 (N=299,455)</div>
               </div>
 
               <div className={`p-4 rounded-2xl border ${cardBg}`}>
@@ -708,8 +754,8 @@ export default function App() {
                   <span>Implicit ALS CF</span>
                   <CheckCircle2 className="h-4 w-4 text-indigo-400" />
                 </div>
-                <div className="text-lg font-extrabold text-indigo-300">300k Users × 1.69M Items</div>
-                <div className="text-xs text-indigo-400 font-mono mt-1">HR@10: 0.7644 | MRR: 0.5798</div>
+                <div className="text-lg font-extrabold text-indigo-300">299,455 Users × 2.46M Items</div>
+                <div className="text-xs text-indigo-400 font-mono mt-1">HR@10: 0.6153 | MRR: 0.3998</div>
               </div>
 
               <div className={`p-4 rounded-2xl border ${cardBg}`}>
@@ -718,7 +764,7 @@ export default function App() {
                   <Database className="h-4 w-4 text-purple-400" />
                 </div>
                 <div className="text-lg font-extrabold text-purple-300">all-MiniLM-L6-v2</div>
-                <div className="text-xs text-purple-400 font-mono mt-1">FAISS IndexFlatIP (200k Items)</div>
+                <div className="text-xs text-purple-400 font-mono mt-1">HR@10: 0.1297 | MRR: 0.0662 (N=299,455)</div>
               </div>
 
               <div className={`p-4 rounded-2xl border ${cardBg}`}>
@@ -1034,6 +1080,54 @@ export default function App() {
                     <div className="bg-gradient-to-r from-purple-500 to-cyan-400 h-full transition-all duration-300" style={{ width: `${simProgress}%` }}></div>
                   </div>
                   <div className="text-right text-[11px] font-mono text-cyan-400">{simProgress}% Hoàn tất</div>
+                </div>
+              )}
+
+              {simError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-mono">
+                  {simError}
+                </div>
+              )}
+
+              {simResults && !isSimulating && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-slate-200">
+                      Kết Quả Mô Phỏng ({simResults.n_users} users × {simResults.negatives} negatives)
+                    </h4>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      α = {simResults.alpha}
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs font-mono">
+                      <thead className={`border-b border-slate-800 text-[11px] uppercase tracking-wider ${isDark ? 'bg-slate-950/80 text-slate-400' : 'bg-slate-100 text-slate-600'}`}>
+                        <tr>
+                          <th className="py-2 px-3">Mô Hình</th>
+                          <th className="py-2 px-3">HR@5</th>
+                          <th className="py-2 px-3 font-bold text-indigo-400">HR@10</th>
+                          <th className="py-2 px-3">HR@20</th>
+                          <th className="py-2 px-3 text-emerald-400">NDCG@10</th>
+                          <th className="py-2 px-3 text-pink-400">MRR</th>
+                        </tr>
+                      </thead>
+                      <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
+                        {[...simResults.models].sort((a: any, b: any) => b.hr10 - a.hr10).map((row: any, idx: number) => (
+                          <tr key={idx} className={idx === 0 ? 'bg-indigo-500/5' : ''}>
+                            <td className="py-2 px-3 font-bold text-slate-200 flex items-center gap-2">
+                              {row.name}
+                              {idx === 0 && <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-1.5 py-0.5 rounded">👑 Top 1</span>}
+                            </td>
+                            <td className="py-2 px-3">{row.hr5.toFixed(4)}</td>
+                            <td className="py-2 px-3 font-bold text-indigo-400">{row.hr10.toFixed(4)}</td>
+                            <td className="py-2 px-3">{row.hr20.toFixed(4)}</td>
+                            <td className="py-2 px-3 text-emerald-400">{row.ndcg10.toFixed(4)}</td>
+                            <td className="py-2 px-3 text-pink-400">{row.mrr.toFixed(4)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>

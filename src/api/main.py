@@ -19,7 +19,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import ARTIFACTS_DIR, RESULTS_DIR, NUM_USERS, NUM_ITEMS
-from ..serving.pipeline import RecommenderPipeline
+import numpy as np
+
+try:
+    import torch
+    _HAS_TORCH = True
+except Exception:
+    torch = None
+    _HAS_TORCH = False
 
 app = FastAPI(title="Deep Hybrid Recommender Studio", version="2.1.0")
 
@@ -242,12 +249,222 @@ def item_info(item_idx: int):
     return get_item_metadata(item_idx)
 
 
-@app.get("/metrics")
-def metrics():
-    p = RESULTS_DIR / "latest_eval_summary.json"
+# --- Simulation cache (lazy) ---
+_SIM_CACHE = None
+_SIM_FACTORS = {}
+
+
+def _load_sim_cache():
+    global _SIM_CACHE
+    if _SIM_CACHE is not None:
+        return _SIM_CACHE
+    p = ARTIFACTS_DIR / "simulation" / "sim_eval_cache.npz"
     if not p.exists():
-        return {"metrics": None, "message": "no eval results yet"}
-    return {"metrics": json.loads(p.read_text())}
+        return None
+    z = np.load(p)
+    _SIM_CACHE = {
+        "user_rows": z["user_rows"],
+        "hist_offsets": z["hist_offsets"],
+        "hist_items": z["hist_items"],
+        "pos_offsets": z["pos_offsets"],
+        "pos_items": z["pos_items"],
+    }
+    return _SIM_CACHE
+
+
+def _load_sim_factors():
+    if _SIM_FACTORS:
+        return _SIM_FACTORS
+    fd = ARTIFACTS_DIR / "factors"
+    _SIM_FACTORS["als_uf"] = np.load(fd / "als_user_factors_f16.npy", mmap_mode="r").astype(np.float32)
+    _SIM_FACTORS["als_it"] = np.load(fd / "als_item_factors_f16.npy").astype(np.float32)
+    _SIM_FACTORS["bpr_uf"] = np.load(fd / "bpr_user_factors_f16.npy", mmap_mode="r").astype(np.float32)
+    _SIM_FACTORS["bpr_it"] = np.load(fd / "bpr_item_factors_f16.npy").astype(np.float32)
+    sb = np.load(ARTIFACTS_DIR / "sbert" / "sbert_item_embeddings_f16.npy", mmap_mode="r")
+    _SIM_FACTORS["sbert_emb"] = np.asarray(sb[:200000], dtype=np.float32)
+    # deep heads
+    if _HAS_TORCH:
+        from ..models.gated_fusion import AdaptiveLightGate
+        from ..models.early_fusion import DeepCrossFusion
+        gp = ARTIFACTS_DIR / "models" / "light_gated_fusion.pt"
+        dp = ARTIFACTS_DIR / "models" / "deep_early_fusion.pt"
+        if gp.exists():
+            m = AdaptiveLightGate(); m.load_state_dict(torch.load(gp, map_location="cpu")); m.eval()
+            _SIM_FACTORS["gate"] = m
+        if dp.exists():
+            m = DeepCrossFusion(); m.load_state_dict(torch.load(dp, map_location="cpu")); m.eval()
+            _SIM_FACTORS["deep"] = m
+    return _SIM_FACTORS
+
+
+class SimRequest(BaseModel):
+    users: int = 500
+    negatives: int = 99
+    alpha: float = 0.65
+
+
+@app.post("/simulate")
+def simulate(req: SimRequest):
+    cache = _load_sim_cache()
+    if cache is None:
+        raise HTTPException(status_code=404, detail="simulation cache not found; run scripts/10_build_sim_cache.py")
+    f = _load_sim_factors()
+    n = min(max(50, req.users), len(cache["user_rows"]))
+    K = min(max(19, req.negatives), 99)
+    CATALOG = 200000
+    rng = np.random.default_rng(42 + req.users + req.negatives)
+
+    user_rows_sel = cache["user_rows"][:n].astype(np.int64)
+    # gather histories & positives
+    h_off = cache["hist_offsets"]; h_items = cache["hist_items"]
+    p_off = cache["pos_offsets"]; p_items = cache["pos_items"]
+
+    hists = []
+    pos_lists = []
+    for i in range(n):
+        h = h_items[h_off[i]:h_off[i + 1]].tolist()
+        ps = p_items[p_off[i]:p_off[i + 1]].tolist()
+        hists.append(h)
+        pos_lists.append(ps)
+
+    # build candidate matrix
+    cands = np.empty((n, 1 + K), dtype=np.int64)
+    gt_pos = np.empty(n, dtype=np.int64)
+    valid = np.ones(n, dtype=bool)
+    for i in range(n):
+        ps = pos_lists[i]
+        if not ps:
+            valid[i] = False
+            continue
+        gt = int(rng.choice(ps))
+        banned = set(hists[i]) | set(ps)
+        banned.discard(gt)
+        negs = []
+        seen = set()
+        # draw in chunks
+        while len(negs) < K:
+            draw = rng.integers(0, CATALOG, size=K * 4)
+            for x in draw:
+                x = int(x)
+                if x in banned or x == gt or x in seen:
+                    continue
+                seen.add(x)
+                negs.append(x)
+                if len(negs) == K:
+                    break
+        if len(negs) < K:
+            valid[i] = False
+            continue
+        arr = np.array([gt] + negs, dtype=np.int64)
+        rng.shuffle(arr)
+        cands[i] = arr
+        gt_pos[i] = int(np.where(arr == gt)[0][0])
+
+    mask = valid
+    if not mask.any():
+        raise HTTPException(status_code=400, detail="no valid users")
+    cands = cands[mask]
+    gt_pos = gt_pos[mask]
+    uf_sel = user_rows_sel[mask]
+    hists_sel = [hists[i] for i in range(n) if mask[i]]
+    U = len(cands)
+
+    # SBERT user profiles
+    sbert_emb = f["sbert_emb"]
+    usbert = np.zeros((U, 384), dtype=np.float32)
+    for i, h in enumerate(hists_sel):
+        if h:
+            v = sbert_emb[h].mean(axis=0)
+            nn_ = np.linalg.norm(v)
+            usbert[i] = (v / nn_) if nn_ > 1e-8 else 0.0
+
+    # factors
+    als_uf = f["als_uf"]; als_it = f["als_it"]
+    bpr_uf = f["bpr_uf"]; bpr_it = f["bpr_it"]
+
+    def score_cf(uf, itf):
+        items = itf[cands]  # U x K x d
+        users = uf[uf_sel]  # U x d
+        return np.einsum("ukd,ud->uk", items, users, optimize=True)
+
+    cf_als = score_cf(als_uf, als_it)
+    cf_bpr = score_cf(bpr_uf, bpr_it)
+    # sbert scores
+    sb_items = sbert_emb[cands]  # U x K x 384
+    sb_scores = np.einsum("ukd,ud->uk", sb_items, usbert, optimize=True)
+
+    def minmax_rows(x):
+        mn = x.min(axis=1, keepdims=True)
+        mx = x.max(axis=1, keepdims=True)
+        rng_ = mx - mn
+        return np.where(rng_ < 1e-8, 0.0, (x - mn) / np.maximum(rng_, 1e-8))
+
+    # late fusion (alpha)
+    alpha = float(req.alpha)
+    late = alpha * minmax_rows(cf_als) + (1 - alpha) * minmax_rows(sb_scores)
+
+    # deep heads
+    scores_gate = None
+    scores_deep = None
+    if _HAS_TORCH and ("gate" in f or "deep" in f):
+        uf_rep = np.repeat(als_uf[uf_sel][:, None, :], 1 + K, axis=1).reshape(U * (1 + K), -1)
+        i_cf = als_it[cands].reshape(U * (1 + K), -1)
+        i_sb = sbert_emb[cands].reshape(U * (1 + K), -1)
+        usbert_rep = np.repeat(usbert[:, None, :], 1 + K, axis=1).reshape(U * (1 + K), -1)
+        cf_raw = np.einsum("nd,nd->n", i_cf, uf_rep, optimize=True).astype(np.float32)
+        sb_raw = np.einsum("nd,nd->n", i_sb, usbert_rep, optimize=True).astype(np.float32)
+        if "gate" in f:
+            out = np.empty(U * (1 + K), dtype=np.float32)
+            bs = 4096
+            with torch.no_grad():
+                for s in range(0, len(out), bs):
+                    e = min(s + bs, len(out))
+                    bu = torch.tensor(uf_rep[s:e], dtype=torch.float32)
+                    bi = torch.tensor(i_cf[s:e], dtype=torch.float32)
+                    bs_ = torch.tensor(i_sb[s:e], dtype=torch.float32)
+                    bcf = torch.tensor(cf_raw[s:e], dtype=torch.float32)
+                    bsb = torch.tensor(sb_raw[s:e], dtype=torch.float32)
+                    fused, _ = f["gate"](bu, bi, bs_, bcf, bsb)
+                    out[s:e] = fused.numpy()
+            scores_gate = out.reshape(U, 1 + K)
+        if "deep" in f:
+            out = np.empty(U * (1 + K), dtype=np.float32)
+            feats = np.concatenate([uf_rep, i_cf, i_sb], axis=1).astype(np.float32)
+            bs = 4096
+            with torch.no_grad():
+                for s in range(0, len(out), bs):
+                    e = min(s + bs, len(out))
+                    logits = f["deep"](torch.tensor(feats[s:e], dtype=torch.float32)).numpy()
+                    out[s:e] = logits
+            scores_deep = out.reshape(U, 1 + K)
+
+    def metrics_from_scores(scores):
+        order = np.argsort(-scores, axis=1)
+        pos = (order == gt_pos[:, None]).argmax(axis=1)
+        return {
+            "hr5": round(float((pos < 5).mean()), 4),
+            "hr10": round(float((pos < 10).mean()), 4),
+            "hr20": round(float((pos < 20).mean()), 4),
+            "ndcg10": round(float(np.where(pos < 10, 1.0 / np.log2(pos + 2), 0.0).mean()), 4),
+            "mrr": round(float((1.0 / (pos + 1)).mean()), 4),
+        }
+
+    results = []
+    results.append({"id": "als", "name": "ALS Collaborative Filtering", **metrics_from_scores(cf_als)})
+    results.append({"id": "bpr", "name": "BPR Bayesian Ranking", **metrics_from_scores(cf_bpr)})
+    results.append({"id": "sbert", "name": "SBERT Content-Based", **metrics_from_scores(sb_scores)})
+    results.append({"id": "late_fusion", "name": f"Late Fusion (α={alpha})", **metrics_from_scores(late)})
+    if scores_gate is not None:
+        results.append({"id": "light_gated", "name": "Light Gated Late Fusion", **metrics_from_scores(scores_gate)})
+    if scores_deep is not None:
+        results.append({"id": "deep_early", "name": "Deep Early Fusion (DCN)", **metrics_from_scores(scores_deep)})
+
+    return {
+        "n_users": int(U),
+        "negatives": int(K),
+        "alpha": alpha,
+        "models": results,
+    }
 
 
 # Serve built frontend if present
