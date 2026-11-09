@@ -41,6 +41,11 @@ export default function App() {
   const [recError, setRecError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [cartCount, setCartCount] = useState<number>(0);
+  const [modelStatus, setModelStatus] = useState<Record<string,string>>({});
+  const [sbertDim, setSbertDim] = useState<number | null>(null);
+  const [wishlist, setWishlist] = useState<Set<number>>(new Set());
+  const [selectedItem, setSelectedItem] = useState<any>(null);
+  const [historyInput, setHistoryInput] = useState<string>('');
 
   // Simulator
   const [simUsers, setSimUsers] = useState<number>(2000);
@@ -73,9 +78,12 @@ export default function App() {
     setIsLoading(true);
     setRecError(null);
     try {
-      const data = await fetchRecommendations({ customer_id: cid, model: mdl, k: topK, alpha: a, history: userHistory });
+      const hist = historyInput.split(/[\s,]+/).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n) && n >= 0);
+      const data = await fetchRecommendations({ customer_id: cid, model: mdl, k: topK, alpha: a, history: hist.length ? hist : userHistory });
       setItemsMeta(data.items_meta || []);
       setLatencyMs(data.latency_ms || 0);
+      setModelStatus(data.model_status || {});
+      setSbertDim(typeof data.sbert_dim === 'number' ? data.sbert_dim : null);
       if (data.customer_id) setResolvedUser({ customer_id: data.customer_id, user_idx: data.user_idx, user_status: data.user_status || 'Verified' });
     } catch (e: any) {
       console.error(e);
@@ -128,7 +136,10 @@ export default function App() {
             <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="flex-1 bg-transparent outline-none text-sm" placeholder="Search recommended products..." />
           </div>
           <div className="flex items-center gap-2">
-            <button className={`p-2 rounded-lg border ${border}`}><Heart className="h-5 w-5" /></button>
+            <button onClick={() => wishlist.size && alert(`Wishlist: ${wishlist.size} item(s)`)} className={`p-2 rounded-lg border ${border} relative`} title="Wishlist">
+              <Heart className={`h-5 w-5 ${wishlist.size ? 'text-pink-500 fill-pink-500' : ''}`} />
+              {wishlist.size > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-pink-500 text-white text-[10px] flex items-center justify-center">{wishlist.size}</span>}
+            </button>
             <button className={`p-2 rounded-lg border ${border} relative`}>
               <ShoppingCart className="h-5 w-5" />
               {cartCount > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">{cartCount}</span>}
@@ -182,18 +193,28 @@ export default function App() {
                 <input type="range" min="4" max="20" step="2" value={topK}
                   onChange={e => setTopK(Number(e.target.value))}
                   className="w-full mb-3" />
-                <button onClick={() => fetchRecs(customerId, model, alpha)}
-                  className="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
-                  {isLoading ? 'Loading...' : 'Get Recommendations'}
-                </button>
+                <label className="text-xs font-medium text-slate-500 block mb-1">User History (item IDs, optional)</label>
+                <input value={historyInput} onChange={e => setHistoryInput(e.target.value)}
+                  placeholder="e.g. 12, 45, 103"
+                  className={`w-full px-3 py-2 rounded-lg border ${border} ${isDark ? 'bg-slate-800' : 'bg-slate-50'} text-sm mb-3`} />
+                <div className="flex gap-2">
+                  <button onClick={() => fetchRecs(customerId, model, alpha)}
+                    className="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+                    {isLoading ? 'Loading...' : 'Get Recommendations'}
+                  </button>
+                  <button onClick={() => { setHistoryInput(''); setSearchQuery(''); setCartCount(0); setWishlist(new Set()); setSelectedItem(null); }}
+                    className={`px-3 py-2 rounded-lg border ${border} text-sm`} title="Reset UI state"><RotateCcw className="h-4 w-4" /></button>
+                </div>
                 {recError && <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{recError}</div>}
                 {resolvedUser && (
                   <div className={`mt-3 text-xs ${muted}`}>
                     <div>User: {resolvedUser.customer_id}</div>
                     <div>Status: {resolvedUser.user_status}</div>
-                    <div>Latency: {latencyMs}ms</div>
+                    <div>Latency: {latencyMs}ms{sbertDim ? ` · SBERT ${sbertDim}-d` : ''}</div>
+                    {modelStatus[model] && <div className="text-[10px] mt-1">Model: {modelStatus[model]}</div>}
                   </div>
                 )}
+                {wishlist.size > 0 && <div className={`mt-2 text-xs ${muted}`}>Wishlist: {wishlist.size} items</div>}
               </div>
               {/* Sample users */}
               <div className={`${card} border rounded-xl p-4`}>
@@ -228,9 +249,13 @@ export default function App() {
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
                   {(searchQuery ? itemsMeta.filter(it => [it.title,it.brand,it.category].join(' ').toLowerCase().includes(searchQuery.toLowerCase())) : itemsMeta).map((item, idx) => (
-                    <div key={item.item_idx} className={`${card} border rounded-xl overflow-hidden hover:shadow-md transition-shadow`}>
-                      <div className={`h-36 ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center`}>
+                    <div key={item.item_idx} className={`${card} border rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer`} onClick={() => setSelectedItem(item)}>
+                      <div className={`h-36 ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center relative`}>
                         <Package className="h-12 w-12 text-slate-300" />
+                        <button onClick={(e) => { e.stopPropagation(); setWishlist(w => { const n = new Set(w); n.has(item.item_idx) ? n.delete(item.item_idx) : n.add(item.item_idx); return n; }); }}
+                          className={`absolute top-2 right-2 p-1.5 rounded-full ${isDark ? 'bg-slate-900' : 'bg-white'} border ${border}`}>
+                          <Heart className={`h-4 w-4 ${wishlist.has(item.item_idx) ? 'text-pink-500 fill-pink-500' : 'text-slate-400'}`} />
+                        </button>
                       </div>
                       <div className="p-3">
                         <div className="text-[10px] font-medium text-indigo-600 uppercase tracking-wide mb-1">{item.category || 'Product'}</div>
@@ -238,7 +263,7 @@ export default function App() {
                         {item.brand && <div className="text-xs text-slate-500 mb-1">{item.brand}</div>}
                         <div className="flex items-center justify-between mt-2">
                           {item.price && <span className="font-bold text-emerald-600">{item.price}</span>}
-                          <button onClick={() => setCartCount(c => c + 1)} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
+                          <button onClick={(e) => { e.stopPropagation(); setCartCount(c => c + 1); }} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
                         </div>
                       </div>
                     </div>
@@ -385,6 +410,32 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {selectedItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedItem(null)}>
+          <div className={`${card} border rounded-xl max-w-lg w-full p-5`} onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <h3 className="text-lg font-bold">{selectedItem.title || `Item ${selectedItem.item_idx}`}</h3>
+              <button onClick={() => setSelectedItem(null)} className={`px-2 py-1 rounded border ${border} text-sm`}>Close</button>
+            </div>
+            <div className="text-sm space-y-1">
+              {selectedItem.brand && <div><span className={muted}>Brand:</span> {selectedItem.brand}</div>}
+              {selectedItem.category && <div><span className={muted}>Category:</span> {selectedItem.category}</div>}
+              {selectedItem.price && <div><span className={muted}>Price:</span> <span className="text-emerald-600 font-semibold">{selectedItem.price}</span></div>}
+              {selectedItem.asin && <div><span className={muted}>ASIN:</span> {selectedItem.asin}</div>}
+              <div><span className={muted}>Item ID:</span> {selectedItem.item_idx}</div>
+              {selectedItem.description && <p className={`mt-2 text-xs ${muted}`}>{String(selectedItem.description).slice(0, 400)}</p>}
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => { setCartCount(c => c + 1); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm">Add to Cart</button>
+              <button onClick={() => setWishlist(w => { const n = new Set(w); n.has(selectedItem.item_idx) ? n.delete(selectedItem.item_idx) : n.add(selectedItem.item_idx); return n; })}
+                className={`px-4 py-2 rounded-lg border ${border} text-sm`}>
+                {wishlist.has(selectedItem.item_idx) ? 'Remove Wishlist' : 'Add to Wishlist'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className={`border-t py-4 text-center text-xs ${muted}`}>
         HYBRID.REC © 2026 — Deep Hybrid Recommender System. 8GB RAM CPU Optimized.
