@@ -3,6 +3,7 @@
 import os, sys, time, json, math, gc, subprocess
 try:
     sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 except Exception:
     pass
 from pathlib import Path
@@ -16,7 +17,7 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from tqdm import tqdm
+# tqdm removed for clearer Kaggle logs
 
 MIN_INTERACTIONS = 3
 CATALOG = 2464371

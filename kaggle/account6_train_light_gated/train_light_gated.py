@@ -7,6 +7,7 @@ ALS (CF) score and SBERT (content) score.
 import os, sys, time, json, math, gc, subprocess
 try:
     sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 except Exception:
     pass
 from pathlib import Path
@@ -23,7 +24,7 @@ import pandas as pd
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from sentence_transformers import SentenceTransformer
-from tqdm import tqdm
+# tqdm removed for clearer Kaggle logs
 
 MIN_INTERACTIONS = 3
 CATALOG = 2464371
@@ -104,11 +105,14 @@ log(f"ALS factors: {user_cf.shape} / {item_cf.shape} | RAM {mem_info()}")
 
 # ---- Compact indices (same protocol as the SBERT kernel) ----
 train_files = sorted(BASE_DIR.glob("train/*.parquet"))
+log(f"[STEP 2] Reading {len(train_files)} train parquet file(s)...")
 dfs = []
-for f in tqdm(train_files, desc="Reading train"):
+for i, f in enumerate(train_files, 1):
+    log(f"[STEP 2]   train {i}/{len(train_files)}: {f.name}")
     d = pq.read_table(f, columns=["user_idx", "item_idx", "rating"]).to_pandas()
     d = d[d["rating"] >= 4.0]
     dfs.append(d[["user_idx", "item_idx"]])
+    log(f"[STEP 2]   -> kept {len(dfs[-1]):,} positive rows")
 train_df = pd.concat(dfs, ignore_index=True)
 user_counts = train_df["user_idx"].value_counts()
 active = user_counts[user_counts >= MIN_INTERACTIONS].index
@@ -138,12 +142,15 @@ np.save(OUT_DIR / "als_item_factors_f16.npy", item_cf.astype(np.float16))
 
 # ---- Test + history ----
 test_files = sorted(BASE_DIR.glob("test/*.parquet"))
+log(f"Reading {len(test_files)} test parquet file(s)...")
 dfs_test = []
-for f in tqdm(test_files, desc="Reading test"):
+for i, f in enumerate(test_files, 1):
+    log(f"  test {i}/{len(test_files)}: {f.name}")
     t = pq.read_table(f, columns=["user_idx", "item_idx", "rating"])
     d = t.to_pandas()
     d = d[d["rating"] >= 4.0]
     dfs_test.append(d[["user_idx", "item_idx"]])
+    log(f"  -> kept {len(dfs_test[-1]):,} positive rows")
 test_df = pd.concat(dfs_test, ignore_index=True)
 test_df = test_df[test_df["user_idx"].isin(set(u_uniq.tolist()))]
 u_map = {orig: ci for ci, orig in enumerate(u_uniq)}

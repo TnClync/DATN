@@ -6,6 +6,7 @@ Run this BEFORE the graph_* per-model kernels.
 import os, sys, time, json, math, gc, subprocess
 try:
     sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 except Exception:
     pass
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -20,7 +21,7 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 from scipy.sparse import csr_matrix, coo_matrix
-from tqdm import tqdm
+# (tqdm removed for clearer Kaggle logs)
 
 _T0 = time.time()
 
@@ -67,11 +68,14 @@ BASE_DIR = find_base_dir()
 
 # ---- Load train ----
 train_files = sorted(BASE_DIR.glob("train/*.parquet"))
+log(f"[STEP 1] Reading {len(train_files)} train parquet file(s)...")
 dfs = []
-for f in tqdm(train_files, desc="Reading train"):
+for i, f in enumerate(train_files, 1):
+    log(f"[STEP 1]   file {i}/{len(train_files)}: {f.name}")
     d = pq.read_table(f, columns=["user_idx", "item_idx", "rating"]).to_pandas()
     d = d[d["rating"] >= 4.0]
     dfs.append(d[["user_idx", "item_idx"]])
+    log(f"[STEP 1]   -> kept {len(dfs[-1]):,} positive rows")
 train_df = pd.concat(dfs, ignore_index=True)
 user_counts = train_df["user_idx"].value_counts()
 active = user_counts[user_counts >= MIN_INTERACTIONS].index
