@@ -9,7 +9,9 @@ Outputs (float16, written chunk-by-chunk with np.memmap so RAM stays low):
 
 Kaggle optimizations:
   - vectorized parquet text building (no slow iterrows)
-  - chunked encode with live logs (steps, timings, RAM/GPU usage)
+  - chunked encode with live logs (steps, timings, texts/s, RAM/GPU usage)
+  - fp16 forward pass on T4 tensor cores
+  - dynamic token-bucketed batching (short fallback texts get 4x bigger batches)
   - multi-GPU: one shared worker pool on cuda:0 + cuda:1 (T4 x2)
   - no float32 concatenation of the full matrix (avoid OOM)
 """
@@ -81,19 +83,22 @@ OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artif
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 N_GPUS = torch.cuda.device_count() if torch.cuda.is_available() else 0
+USE_FP16 = N_GPUS >= 1                 # fp16 inference on T4 tensor cores (~1.5-2x)
+SHORT_MAX_TOKENS = 24                  # "Product item <id>" fallback texts are ~5 tokens
+BATCH_SIZE_SHORT = 2048                # tiny sequences -> big batches (less launch overhead)
+BATCH_SIZE_LONG = 512                  # real metadata/review text
+
 if N_GPUS >= 1:
     DEVICE = "cuda"
-    _vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
-    BATCH_SIZE = 512 if _vram_gb < 14 else 768
 else:
     DEVICE = "cpu"
-    BATCH_SIZE = 64
 
-log(f"OUT_DIR      = {OUT_DIR}")
-log(f"DEVICE       = {DEVICE}  (N_GPUS={N_GPUS})")
-log(f"BATCH_SIZE   = {BATCH_SIZE}")
-log(f"ENCODE_CHUNK = {ENCODE_CHUNK:,}")
-log(f"MODEL        = {MODEL_NAME}")
+log(f"OUT_DIR       = {OUT_DIR}")
+log(f"DEVICE        = {DEVICE}  (N_GPUS={N_GPUS})")
+log(f"FP16          = {USE_FP16}")
+log(f"BATCH (s/l)   = {BATCH_SIZE_SHORT}/{BATCH_SIZE_LONG}")
+log(f"ENCODE_CHUNK  = {ENCODE_CHUNK:,}")
+log(f"MODEL         = {MODEL_NAME}")
 
 
 def find_base_dir() -> Path:
@@ -236,7 +241,10 @@ log("=" * 60)
 
 log(f"loading model {MODEL_NAME}")
 sbert = SentenceTransformer(MODEL_NAME, device=(f"cuda:0" if N_GPUS else "cpu"))
-log(f"model loaded | {gpu_mem()} | RAM {mem_info()}")
+if USE_FP16:
+    sbert = sbert.half()
+    torch.backends.cuda.matmul.allow_tf32 = True
+log(f"model loaded | dtype={next(sbert.parameters()).dtype} | {gpu_mem()} | RAM {mem_info()}")
 
 # Kaggle "GPU T4 x2" -> 2 devices. One shared pool: workers are created once and
 # reused for every chunk (much cheaper than spawning a pool per encode call).
@@ -250,23 +258,61 @@ if N_GPUS >= 2:
         log(f"multi-GPU pool failed ({e}) -> falling back to single device")
 
 
-def encode_texts(texts, desc: str):
-    """Encode a list of texts, returning a float32 (n, 384) numpy array."""
-    if not texts:
-        return np.zeros((0, EMB_DIM), dtype=np.float32)
-    _t = time.time()
+def _token_lengths(texts):
+    """Fast batch tokenization -> sequence lengths (drives dynamic batching)."""
+    enc = sbert.tokenizer(texts, add_special_tokens=True, truncation=True,
+                          max_length=sbert.max_seq_length)
+    return np.fromiter((len(x) for x in enc["input_ids"]), dtype=np.int32, count=len(texts))
+
+
+def _encode_raw(texts, batch_size):
     if POOL is not None:
-        embs = sbert.encode(texts, pool=POOL, batch_size=BATCH_SIZE, chunk_size=5_000,
-                            show_progress_bar=True, convert_to_numpy=True,
-                            normalize_embeddings=True)
+        embs = sbert.encode(texts, pool=POOL, batch_size=batch_size, chunk_size=5_000,
+                            show_progress_bar=True, convert_to_numpy=True)
     else:
-        embs = sbert.encode(texts, batch_size=BATCH_SIZE, show_progress_bar=True,
-                            convert_to_numpy=True, normalize_embeddings=True,
-                            device=DEVICE)
-    if not isinstance(embs, np.ndarray):
-        embs = np.asarray(embs, dtype=np.float32)
-    log(f"  {desc}: {len(texts):,} texts encoded in {time.time() - _t:.1f}s | {gpu_mem()}")
-    return embs
+        embs = sbert.encode(texts, batch_size=batch_size, show_progress_bar=True,
+                            convert_to_numpy=True, device=DEVICE)
+    return np.asarray(embs, dtype=np.float32)
+
+
+def encode_texts(texts, desc: str):
+    """Dynamic (token-bucketed) batching: short texts get much larger batches.
+
+    Encoder inference has no decode loop, so "continuous batching" in the vLLM
+    sense does not apply; the equivalent win is to size each forward batch by
+    sequence length instead of using one fixed batch size for everything.
+    """
+    n = len(texts)
+    if n == 0:
+        return np.zeros((0, EMB_DIM), dtype=np.float32)
+
+    _t = time.time()
+    if N_GPUS == 0:
+        # CPU fallback: dynamic bucketing only doubles tokenization cost here
+        out = _encode_raw(texts, 128)
+    else:
+        lens = _token_lengths(texts)
+        order = np.argsort(lens, kind="stable")
+        short_idx = order[lens[order] <= SHORT_MAX_TOKENS]
+        long_idx = order[lens[order] > SHORT_MAX_TOKENS]
+
+        out = np.empty((n, EMB_DIM), dtype=np.float32)
+        for idx, bs, label in ((short_idx, BATCH_SIZE_SHORT, "short"),
+                               (long_idx, BATCH_SIZE_LONG, "long")):
+            if idx.size == 0:
+                continue
+            out[idx] = _encode_raw([texts[i] for i in idx], bs)
+            log(f"  {desc} [{label}] {idx.size:,} texts | batch={bs} | {gpu_mem()}")
+
+    # L2-normalize in float32 (fp16 forward pass, stable cosine scores)
+    norms = np.linalg.norm(out, axis=1, keepdims=True)
+    np.divide(out, np.maximum(norms, 1e-12), out=out)
+    if not np.isfinite(out).all():
+        log(f"  WARN {desc}: non-finite values detected")
+
+    dt = max(time.time() - _t, 1e-9)
+    log(f"  {desc}: {n:,} texts in {dt:.1f}s = {n / dt:,.0f} texts/s")
+    return out
 
 
 meta_path = OUT_DIR / "sbert_meta_embeddings_f16.npy"
@@ -425,7 +471,11 @@ summary = {
     "device": DEVICE,
     "cuda_devices": int(N_GPUS),
     "multi_gpu_pool": POOL is not None,
-    "batch_size": int(BATCH_SIZE),
+    "fp16": bool(USE_FP16),
+    "dynamic_batching": True,
+    "batch_size_short": int(BATCH_SIZE_SHORT),
+    "batch_size_long": int(BATCH_SIZE_LONG),
+    "short_max_tokens": int(SHORT_MAX_TOKENS),
     "elapsed_sec": round(time.time() - _T0, 1),
 }
 (OUT_DIR / "sbert_summary.json").write_text(json.dumps(summary, indent=2))
