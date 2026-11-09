@@ -24,7 +24,7 @@
 |----------------------------|-------------------------|-------------------------|---------------------------|-------|
 | User Factors (CF)          | MF-bias / ALS / Bayesian | `.npy` (float16) + mmap | ~2.8 GB (22M × 64)       | Memory-map on deploy |
 | Item Factors (CF)          | MF-bias / ALS / Bayesian | `.npy` (float16)        | ~480 MB                  | Keep in RAM |
-| SBERT Item Embeddings      | all-MiniLM-L6-v2        | `.npy` or FAISS index   | ~600–800 MB              | 384-dim |
+| SBERT Item Embeddings      | all-MiniLM-L6-v2        | `.npy` or FAISS index   | ~600–800 MB              | 768-dim (meta 384 + reviewer 384) |
 | FAISS Index (SBERT)        | HNSW or IVF+PQ          | `.index`                | 400–700 MB               | For fast candidate retrieval |
 | Item Metadata / Text       | Title, category, etc.   | Parquet / JSON          | Small                    | For reranker input |
 | User History (recent)      | Interaction log         | Dict / Redis / mmap     | Variable                 | Needed for personalization |

@@ -32,7 +32,7 @@ for d in (ARTIFACTS_DIR, FACTORS_DIR, SBERT_DIR, FAISS_DIR, MODELS_DIR, RESULTS_
 NUM_USERS = 22_048_170
 NUM_ITEMS = 3_686_940
 CF_FACTORS = 32
-SBERT_DIM = 384
+SBERT_DIM = 768   # combined SBERT item embeddings (metadata | reviewer) -> 768-d
 
 # Reproducibility
 SEED = 42

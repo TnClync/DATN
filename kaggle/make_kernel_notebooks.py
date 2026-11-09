@@ -43,6 +43,7 @@ SECTION_TITLES = {
     "Train + test (same as other kernels)": "Build train / test splits",
     "Test + history": "Build test split & user history",
     "Baselines": "Baseline scores (CF / SBERT / late fusion)",
+    "Compact indices (same protocol as the SBERT kernel)": "Build compact indices",
     "LightGCN": "Train LightGCN (BPR)",
     "Two-Tower": "Train Two-Tower model",
     "Transformer Fusion": "Train Transformer Fusion model",

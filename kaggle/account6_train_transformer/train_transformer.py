@@ -25,6 +25,7 @@ SEED = 42
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+EVAL_BATCH_USERS = 64    # eval: self-attention is O(C^2), keep the batch smaller
 
 
 def find_base_dir():
@@ -44,13 +45,29 @@ def find_file(name):
     pref = [p for p in hits if "train-lightgcn" in str(p) or "graph-deep-hybrid" in str(p) or "deep-hybrid-recommender" in str(p)]
     return (pref[0] if pref else hits[0]) if hits else None
 
+def find_sbert_file(dim=768):
+    """Locate the 768-d combined SBERT artifact (older kernels also wrote 384-d copies)."""
+    hits = sorted(Path("/kaggle/input").rglob("sbert_item_embeddings_f16.npy"))
+    hits.sort(key=lambda p: 0 if "train-sbert" in str(p) else 1)
+    for p in hits:
+        try:
+            a = np.load(p, mmap_mode="r")
+            if a.ndim == 2 and a.shape[1] == dim:
+                return p
+        except Exception:
+            continue
+    return None
+
 
 BASE_DIR = find_base_dir()
 
 # ---- Load factors + SBERT + graph embeddings ----
 graph_user = np.load(find_file("graph_user_factors_f16.npy")).astype(np.float32)
 graph_item = np.load(find_file("graph_item_factors_f16.npy")).astype(np.float32)
-item_sbert = np.asarray(np.load(find_file("sbert_item_embeddings_f16.npy"), mmap_mode="r")[:CATALOG], dtype=np.float32)
+sbert_path = find_sbert_file()
+assert sbert_path is not None, "768-d sbert_item_embeddings_f16.npy not found - run the SBERT kernel first"
+item_sbert = np.asarray(np.load(sbert_path, mmap_mode="r")[:CATALOG], dtype=np.float32)
+print(f"SBERT item embeddings: {item_sbert.shape} | {sbert_path}")
 u_ids = np.load(find_file("user_ids.npy"))
 i_ids = np.load(find_file("item_ids.npy"))
 n_users, n_items = len(u_ids), len(i_ids)
@@ -218,24 +235,47 @@ for ep in range(10):
     print(f"Transformer Epoch {ep+1}/10 Loss: {tot/max(1,nb):.4f}")
 torch.save(transformer.state_dict(), OUT_DIR / "transformer_fusion.pt")
 
-# Eval
+# Eval — batched: B users x C candidates as ONE (B, C, dim) tensor.
+# Self-attention runs per user sequence, so batching does NOT change the scores.
 transformer.eval()
-agg = {k: 0.0 for k in ["HR@5", "HR@10", "HR@20", "Recall@5", "Recall@10", "Recall@20",
-                         "NDCG@5", "NDCG@10", "NDCG@20", "MRR"]}
-with torch.no_grad():
-    for inst in test_inst:
-        u = inst["user"]; cands = inst["candidates"]; gt = inst["gt"]
-        feat = np.concatenate([
-            np.repeat(graph_user[u][None, :], len(cands), axis=0),
-            graph_item[cands],
-            item_sbert[cands],
-        ], axis=1).astype(np.float32)
-        logits = transformer(torch.tensor(feat[None, ...], dtype=torch.float32).to(DEVICE)).squeeze(0).cpu().numpy()
-        ranked = cands[np.argsort(-logits)]
-        m = compute_metrics(ranked, gt)
-        for k in agg:
-            agg[k] += m[k]
-res_tf = {k: round(v / max(1, len(test_inst)), 4) for k, v in agg.items()}
+
+
+def eval_transformer(instances, batch_users=EVAL_BATCH_USERS):
+    keys = ["HR@5", "HR@10", "HR@20", "Recall@5", "Recall@10", "Recall@20",
+            "NDCG@5", "NDCG@10", "NDCG@20", "MRR"]
+    agg = {k: 0.0 for k in keys}
+    n = len(instances)
+    n_batches = (n + batch_users - 1) // batch_users
+    t0 = time.time()
+    with torch.no_grad():
+        for bi, start in enumerate(range(0, n, batch_users)):
+            batch = instances[start:start + batch_users]
+            b = len(batch)
+            c = len(batch[0]["candidates"])
+            users = np.array([inst["user"] for inst in batch], dtype=np.int64)
+            cands = np.stack([inst["candidates"] for inst in batch])           # (B, C)
+
+            feats = np.concatenate([
+                np.repeat(graph_user[users][:, None, :], c, axis=1),           # (B, C, 32)
+                graph_item[cands],                                             # (B, C, 32)
+                item_sbert[cands],                                             # (B, C, 768)
+            ], axis=2).astype(np.float32)                                      # (B, C, dim)
+
+            logits = transformer(torch.from_numpy(feats).to(DEVICE)).cpu().numpy()  # (B, C)
+            for row in range(b):
+                ranked = cands[row][np.argsort(-logits[row])]
+                m = compute_metrics(ranked, batch[row]["gt"])
+                for k in keys:
+                    agg[k] += m[k]
+            if bi % 10 == 0 or bi == n_batches - 1:
+                print(f"  eval batch {bi + 1}/{n_batches} "
+                      f"({start + b:,}/{n:,} users) {time.time() - t0:.1f}s", flush=True)
+    print(f"  eval done: {n:,} users in {time.time() - t0:.1f}s "
+          f"({n / max(time.time() - t0, 1e-9):,.0f} users/s)", flush=True)
+    return {k: round(v / max(1, n), 4) for k, v in agg.items()}
+
+
+res_tf = eval_transformer(test_inst)
 print("Transformer Fusion:", res_tf)
 
 summary = {"model": "transformer", "n_eval_users": len(test_inst), "transformer_fusion": res_tf}

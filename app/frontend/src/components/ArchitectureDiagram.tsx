@@ -16,17 +16,17 @@ function Box({ title, sub, color, small }: BoxProps) {
   );
 }
 
-function Arrow({ vertical = false }: { vertical?: boolean }) {
+function Arrow({ vertical = false, label }: { vertical?: boolean; label?: string }) {
   return vertical
     ? <div className="flex justify-center py-1"><div className="w-0.5 h-6 bg-slate-300" /><div className="w-0 h-0 border-l-4 border-r-4 border-t-6 border-l-transparent border-r-transparent border-t-slate-300 -mt-1" /></div>
     : <div className="flex items-center px-1"><div className="h-0.5 w-6 bg-slate-300" /><div className="w-0 h-0 border-t-4 border-b-4 border-l-6 border-t-transparent border-b-transparent border-l-slate-300 -ml-1" /></div>;
 }
 
 export default function ArchitectureDiagram({ isDark }: { isDark: boolean }) {
-  const box = (title: string, sub: string, color: string) => (
-    <div className={`rounded-lg border ${color} px-3 py-2 text-center`}>
-      <div className="text-xs font-bold">{title}</div>
-      <div className="text-[9px] opacity-60 mt-0.5">{sub}</div>
+  const box = (title: string, sub: string, color: string, small?: boolean) => (
+    <div className={`rounded-lg border ${color} ${small ? 'px-3 py-2' : 'px-4 py-3'} text-center shadow-sm`}>
+      <div className={`font-bold ${small ? 'text-xs' : 'text-sm'}`}>{title}</div>
+      <div className={`text-[10px] mt-0.5 opacity-70`}>{sub}</div>
     </div>
   );
 

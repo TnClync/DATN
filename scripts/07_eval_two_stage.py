@@ -119,7 +119,7 @@ def main() -> None:
     user_sbert = {}
     for u in eval_set:
         h = hist.get(u, [])
-        v = np.asarray(sbert[h], dtype=np.float32).mean(0) if h else np.zeros(384, dtype=np.float32)
+        v = np.asarray(sbert[h], dtype=np.float32).mean(0) if h else np.zeros(768, dtype=np.float32)
         n = np.linalg.norm(v)
         user_sbert[u] = (v / n).astype(np.float32) if n > 1e-8 else v.astype(np.float32)
 

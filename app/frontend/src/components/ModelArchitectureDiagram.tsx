@@ -41,7 +41,7 @@ export default function ModelArchitectureDiagram({ isDark }: { isDark: boolean }
       <p className="text-xs text-slate-500 mb-4">From raw interactions to ranked recommendations</p>
 
       {/* Input */}
-      {Section('1. Input')}
+      <Section key="s1" label="1. Input" />
       <div className="flex justify-center gap-4">
         <Box title="User History" sub="item_idx list" color="border-blue-300 bg-blue-50" />
         <Box title="Item Catalog" sub="200k shared items" color="border-blue-300 bg-blue-50" />
@@ -49,7 +49,7 @@ export default function ModelArchitectureDiagram({ isDark }: { isDark: boolean }
       <Arrow vertical />
 
       {/* CF branch */}
-      {Section('2a. Collaborative Filtering Branch')}
+      <Section key="s2a" label="2a. Collaborative Filtering Branch" />
       <div className="grid grid-cols-3 gap-2">
         <Box title="ALS (implicit)" sub="32-dim factors" color="border-purple-300 bg-purple-50" />
         <Box title="BPR (implicit)" sub="32-dim factors" color="border-purple-300 bg-purple-50" />
@@ -59,7 +59,7 @@ export default function ModelArchitectureDiagram({ isDark }: { isDark: boolean }
       <Arrow vertical label="CF score" />
 
       {/* Content branch */}
-      {Section('2b. Content-Based Branch (SBERT)')}
+      <Section key="s2b" label="2b. Content-Based Branch (SBERT)" />
       <div className="grid grid-cols-2 gap-2">
         <Box title="SBERT Metadata" sub="title+brand+cat+desc → 384-dim" color="border-emerald-300 bg-emerald-50" />
         <Box title="SBERT Reviewer" sub="review_content → 384-dim" color="border-emerald-300 bg-emerald-50" />
@@ -68,7 +68,7 @@ export default function ModelArchitectureDiagram({ isDark }: { isDark: boolean }
       <Arrow vertical label="Content score" />
 
       {/* Fusion */}
-      {Section('3. Fusion / Deep Hybrid Models')}
+      <Section key="s3" label="3. Fusion / Deep Hybrid Models" />
       <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
         <Box title="Late Fusion" sub="α·CF + (1-α)·SBERT" color="border-amber-300 bg-amber-50" />
         <Box title="Light Gated" sub="neural gate per (u,i)" color="border-amber-300 bg-amber-50" />
@@ -81,7 +81,7 @@ export default function ModelArchitectureDiagram({ isDark }: { isDark: boolean }
       <Arrow vertical label="fused scores" />
 
       {/* Output */}
-      {Section('4. Output')}
+      <Section key="s4" label="4. Output" />
       <div className="flex justify-center">
         <Box title="Ranked Top-K" sub="HR@K, NDCG@K, MRR" color="border-rose-300 bg-rose-50" wide />
       </div>

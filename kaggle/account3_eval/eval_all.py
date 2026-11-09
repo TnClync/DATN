@@ -22,6 +22,7 @@ import torch.nn as nn
 
 MIN_INTERACTIONS = 3
 CATALOG = 2464371
+SBERT_DIM = 768   # combined SBERT item embeddings (metadata | reviewer), built by the SBERT kernel
 SEED = 42
 BATCH = 1024
 DEEP_BATCH = 256
@@ -68,11 +69,37 @@ def find_file(name: str) -> Path:
         for root in sorted(Path("/kaggle/input").iterdir()):
             print("  input:", root)
         raise FileNotFoundError(name)
-    # Prefer artifacts produced by the deep-hybrid kernel (our training source).
-    preferred = [p for p in hits if "deep-hybrid" in str(p)]
+    # Prefer artifacts produced by the dedicated single-model training kernels.
+    preferred = []
+    if name == "sbert_item_embeddings_f16.npy":
+        preferred = [p for p in hits if "train-sbert" in str(p)]
+    elif name in ("light_gated_fusion.pt", "deep_early_fusion.pt", "graph_light_gated_fusion.pt",
+                  "two_tower_fusion.pt", "transformer_fusion.pt"):
+        pref_key = {"light_gated_fusion.pt": "train-light_gated",
+                    "deep_early_fusion.pt": "train-deep_early",
+                    "graph_light_gated_fusion.pt": "train-graph_light_gated",
+                    "two_tower_fusion.pt": "train-two_tower",
+                    "transformer_fusion.pt": "train-transformer"}[name]
+        preferred = [p for p in hits if pref_key in str(p)]
+    if not preferred:
+        preferred = [p for p in hits if "deep-hybrid" in str(p)]
     chosen = preferred[0] if preferred else hits[0]
     print(f"Using {name}: {chosen}")
     return chosen
+
+
+def find_sbert_file(dim: int = SBERT_DIM):
+    """Locate the SBERT artifact with the expected dimension (768 = meta | reviewer)."""
+    hits = sorted(Path("/kaggle/input").rglob("sbert_item_embeddings_f16.npy"))
+    hits.sort(key=lambda p: 0 if "train-sbert" in str(p) else 1)
+    for p in hits:
+        try:
+            a = np.load(p, mmap_mode="r")
+            if a.ndim == 2 and a.shape[1] == dim:
+                return p
+        except Exception:
+            continue
+    return None
 
 
 def read_split(directory: Path, columns: list[str]) -> pd.DataFrame:
@@ -103,7 +130,9 @@ als_uf = np.load(find_file("als_user_factors_f16.npy"), mmap_mode="r")
 als_itf = np.load(find_file("als_item_factors_f16.npy")).astype(np.float32)
 bpr_uf = np.load(find_file("bpr_user_factors_f16.npy"), mmap_mode="r")
 bpr_itf = np.load(find_file("bpr_item_factors_f16.npy")).astype(np.float32)
-item_sbert = np.load(find_file("sbert_item_embeddings_f16.npy"), mmap_mode="r")
+item_sbert = np.load(find_sbert_file(), mmap_mode="r")
+sbert_path = find_sbert_file()
+assert sbert_path is not None, "768-d sbert_item_embeddings_f16.npy not found - run the SBERT kernel first"
 gate_path = find_file("light_gated_fusion.pt")
 deep_path = find_file("deep_early_fusion.pt")
 u_ids = np.load(find_file("user_ids.npy"))
@@ -112,6 +141,7 @@ n_users, n_items = len(u_ids), len(i_ids)
 print(f"Ids: {n_users:,} users x {n_items:,} items | SBERT {item_sbert.shape}")
 # Only the first CATALOG rows are ever used; cache them in RAM as float32.
 sbert_cat = np.asarray(item_sbert[:CATALOG], dtype=np.float32)
+assert sbert_cat.shape[1] == SBERT_DIM, f"expected {SBERT_DIM}-d SBERT, got {sbert_cat.shape}"
 print(f"SBERT catalog cache: {sbert_cat.shape} ({sbert_cat.nbytes / 1e6:.0f} MB)")
 
 
@@ -168,7 +198,7 @@ for u, i in zip(cu[mask], ci[mask]):
         hist.setdefault(int(u), []).append(int(i))
 print(f"History built for {len(hist):,} users")
 
-user_sbert = np.zeros((N, 384), dtype=np.float32)
+user_sbert = np.zeros((N, SBERT_DIM), dtype=np.float32)
 u_to_row = {int(u): k for k, u in enumerate(elig_users)}
 for u, k in u_to_row.items():
     h = hist.get(u, [])
@@ -340,7 +370,7 @@ if HAS_FAISS:
     # Both retrievers search the SAME shared 200k-item catalog used by every model.
     cf_index = faiss.IndexFlatIP(als_itf.shape[1])
     cf_index.add(als_itf[:CATALOG])
-    sb_index = faiss.IndexFlatIP(384)
+    sb_index = faiss.IndexFlatIP(SBERT_DIM)
     sb_index.add(sbert_cat)
     print("FAISS indexes:", cf_index.ntotal, sb_index.ntotal)
 
@@ -423,7 +453,7 @@ else:
 
 # ---------------------------------------------------------------- deep heads
 class LightGate(nn.Module):
-    def __init__(self, in_features=32 + 32 + 384):
+    def __init__(self, in_features=32 + 32 + SBERT_DIM):
         super().__init__()
         self.gate_net = nn.Sequential(
             nn.Linear(in_features, 64), nn.ReLU(), nn.Dropout(0.1),
@@ -453,7 +483,7 @@ class DeepEarlyFusion(nn.Module):
 gate_model = LightGate()
 gate_model.load_state_dict(torch.load(gate_path, map_location="cpu"))
 gate_model.eval()
-deep_model = DeepEarlyFusion(32 + 32 + 384)
+deep_model = DeepEarlyFusion(32 + 32 + SBERT_DIM)
 deep_model.load_state_dict(torch.load(deep_path, map_location="cpu"))
 deep_model.eval()
 

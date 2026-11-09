@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..config import FACTORS_DIR, SBERT_DIR, FAISS_DIR, MODELS_DIR, NUM_ITEMS
+from ..config import FACTORS_DIR, SBERT_DIR, FAISS_DIR, MODELS_DIR, NUM_ITEMS, SBERT_DIM
 from ..models import cf as cf_mod
 from ..models import late_fusion as lf
 from ..models import sbert as sbert_mod
@@ -252,7 +252,7 @@ class RecommenderPipeline:
             i_sb = np.asarray(self.sbert_emb[cands_arr], dtype=np.float32)
             sb_raw = i_sb @ u_sb
         else:
-            i_sb = np.zeros((len(cands), 384), dtype=np.float32)
+            i_sb = np.zeros((len(cands), SBERT_DIM), dtype=np.float32)
             sb_raw = np.zeros(len(cands), dtype=np.float32)
 
         if model == "light_gated" and self.gate_model is not None and torch is not None:

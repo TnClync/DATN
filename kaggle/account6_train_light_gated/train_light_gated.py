@@ -31,6 +31,7 @@ SEED = 42
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+EVAL_BATCH_USERS = 128   # eval: fuse this many users in ONE forward pass
 
 
 def find_base_dir():
@@ -49,17 +50,17 @@ def find_factor_file(filename):
     hits = sorted(Path("/kaggle/input").rglob(filename))
     return hits[0] if hits else None
 
-
-def find_item_profile_dir():
-    if Path("/kaggle/input").exists():
-        for p in Path("/kaggle/input").rglob("*.parquet"):
-            try:
-                import pyarrow.parquet as pq
-                cols = pq.read_schema(p).names
-                if "title" in cols and "item_idx" in cols:
-                    return p.parent
-            except Exception:
-                pass
+def find_sbert_file(dim=768):
+    """Locate the 768-d combined SBERT artifact (older kernels also wrote 384-d copies)."""
+    hits = sorted(Path("/kaggle/input").rglob("sbert_item_embeddings_f16.npy"))
+    hits.sort(key=lambda p: 0 if "train-sbert" in str(p) else 1)
+    for p in hits:
+        try:
+            a = np.load(p, mmap_mode="r")
+            if a.ndim == 2 and a.shape[1] == dim:
+                return p
+        except Exception:
+            continue
     return None
 
 
@@ -81,33 +82,7 @@ assert als is not None, "ALS factors not found"
 user_cf, item_cf = als
 print(f"ALS factors: {user_cf.shape} / {item_cf.shape}")
 
-# SBERT with real text
-profile_dir = find_item_profile_dir()
-item_text_map = {}
-if profile_dir is not None:
-    for f in sorted(profile_dir.glob("*.parquet")):
-        try:
-            t = pq.read_table(f, columns=["item_idx", "title", "brand", "category", "description"])
-            d = t.to_pandas()
-            for _, r in d.iterrows():
-                parts = []
-                if isinstance(r.get("title"), str) and r["title"].strip():
-                    parts.append(r["title"].strip())
-                if isinstance(r.get("brand"), str) and r["brand"].strip() and "amazon" not in r["brand"].lower():
-                    parts.append(r["brand"].strip())
-                if isinstance(r.get("category"), str) and r["category"].strip():
-                    parts.append(r["category"].strip())
-                desc = r.get("description")
-                if isinstance(desc, str) and desc.strip():
-                    parts.append(desc.strip()[:200])
-                txt = " | ".join(parts)
-                if txt:
-                    item_text_map[int(r["item_idx"])] = txt
-        except Exception as e:
-            print("profile read err", f, e)
-print(f"Loaded real text for {len(item_text_map):,} items")
-
-# Compact indices
+# ---- Compact indices (same protocol as the SBERT kernel) ----
 train_files = sorted(BASE_DIR.glob("train/*.parquet"))
 dfs = []
 for f in tqdm(train_files, desc="Reading train"):
@@ -126,28 +101,22 @@ n_users, n_items = len(u_uniq), len(i_uniq)
 SBERT_COVERAGE = min(n_items, CATALOG)
 compact_to_orig = {idx: int(i_uniq[idx]) for idx in range(n_items)}
 
-item_texts = []
-for ci in range(SBERT_COVERAGE):
-    orig = compact_to_orig[ci]
-    item_texts.append(item_text_map.get(orig, f"Product item {orig}"))
-
-print(f"Encoding {len(item_texts)} items...")
-sbert_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=str(DEVICE))
-sbert_embs = sbert_model.encode(item_texts, batch_size=512, show_progress_bar=True,
-                                convert_to_numpy=True, normalize_embeddings=True)
-item_sbert = np.zeros((n_items, 384), dtype=np.float32)
-item_sbert[:SBERT_COVERAGE] = sbert_embs
-del sbert_embs
-gc.collect()
+# ---- SBERT item embeddings: 768-d (metadata | reviewer), built once by the SBERT kernel ----
+sbert_path = find_sbert_file()
+assert sbert_path is not None, "sbert_item_embeddings_f16.npy not found - run the SBERT kernel first"
+sbert_rows = np.load(sbert_path, mmap_mode="r").shape[0]
+assert sbert_rows >= n_items, f"SBERT rows {sbert_rows:,} < items {n_items:,} - index mismatch"
+item_sbert = np.asarray(np.load(sbert_path, mmap_mode="r")[:n_items], dtype=np.float32)
+assert item_sbert.shape[1] == 768, f"expected 768-d SBERT, got {item_sbert.shape}"
+print(f"SBERT item embeddings: {item_sbert.shape}")
 
 # User ids
 np.save(OUT_DIR / "user_ids.npy", u_uniq)
 np.save(OUT_DIR / "item_ids.npy", i_uniq)
 np.save(OUT_DIR / "als_user_factors_f16.npy", user_cf.astype(np.float16))
 np.save(OUT_DIR / "als_item_factors_f16.npy", item_cf.astype(np.float16))
-np.save(OUT_DIR / "sbert_item_embeddings_f16.npy", item_sbert.astype(np.float16))
 
-# Train history & test
+# ---- Test + history ----
 test_files = sorted(BASE_DIR.glob("test/*.parquet"))
 dfs_test = []
 for f in tqdm(test_files, desc="Reading test"):
@@ -333,24 +302,54 @@ for ep in range(30):
 torch.save(gate.state_dict(), OUT_DIR / "light_gated_fusion.pt")
 
 
-def eval_gate(instances):
+def eval_gate(instances, batch_users=EVAL_BATCH_USERS):
+    """Batched eval: fuse B users x C candidates in ONE forward pass.
+
+    Gate is pointwise over (user, item), so batching only changes how many rows
+    are pushed through the MLP — scores are identical to the per-user loop.
+    """
     gate.eval()
-    agg = {k: 0.0 for k in ["HR@5", "HR@10", "HR@20", "Recall@5", "Recall@10", "Recall@20",
-                             "NDCG@5", "NDCG@10", "NDCG@20", "MRR"]}
+    keys = ["HR@5", "HR@10", "HR@20", "Recall@5", "Recall@10", "Recall@20",
+            "NDCG@5", "NDCG@10", "NDCG@20", "MRR"]
+    agg = {k: 0.0 for k in keys}
+    n = len(instances)
+    n_batches = (n + batch_users - 1) // batch_users
+    t0 = time.time()
     with torch.no_grad():
-        for inst in instances:
-            u = inst["user"]; cands = inst["candidates"]; gt = inst["gt"]
-            bu = torch.tensor(np.repeat(user_cf[u][None, :], len(cands), axis=0), dtype=torch.float32).to(DEVICE)
-            bi = torch.tensor(item_cf[cands], dtype=torch.float32).to(DEVICE)
-            bs = torch.tensor(item_sbert[cands], dtype=torch.float32).to(DEVICE)
-            bcf = torch.tensor(cf_scores(user_cf, item_cf, u, cands), dtype=torch.float32).to(DEVICE)
-            bsb = torch.tensor(sb_scores(u, cands), dtype=torch.float32).to(DEVICE)
-            fused, _ = gate(bu, bi, bs, bcf, bsb)
-            ranked = cands[np.argsort(-fused.cpu().numpy())]
-            m = compute_metrics(ranked, gt)
-            for k in agg:
-                agg[k] += m[k]
-    return {k: round(v / max(1, len(instances)), 4) for k, v in agg.items()}
+        for bi, start in enumerate(range(0, n, batch_users)):
+            batch = instances[start:start + batch_users]
+            b = len(batch)
+            c = len(batch[0]["candidates"])
+            users = np.array([inst["user"] for inst in batch], dtype=np.int64)
+            cands = np.stack([inst["candidates"] for inst in batch])           # (B, C)
+
+            i_cf = item_cf[cands]                                              # (B, C, 32)
+            i_sb = item_sbert[cands]                                           # (B, C, 768)
+            u_cf = user_cf[users]                                              # (B, 32)
+            u_sb = np.stack([user_sbert[int(u)] for u in users])               # (B, 768)
+
+            bcf = np.einsum("bcd,bd->bc", i_cf, u_cf, optimize=True)
+            bsb = np.einsum("bcd,bd->bc", i_sb, u_sb, optimize=True)
+
+            fused, _ = gate(
+                torch.from_numpy(np.repeat(u_cf[:, None, :], c, axis=1)).to(DEVICE),
+                torch.from_numpy(i_cf).to(DEVICE),
+                torch.from_numpy(i_sb).to(DEVICE),
+                torch.from_numpy(bcf.astype(np.float32)).to(DEVICE),
+                torch.from_numpy(bsb.astype(np.float32)).to(DEVICE),
+            )
+            scores = fused.cpu().numpy()
+            for row in range(b):
+                ranked = cands[row][np.argsort(-scores[row])]
+                m = compute_metrics(ranked, batch[row]["gt"])
+                for k in keys:
+                    agg[k] += m[k]
+            if bi % 10 == 0 or bi == n_batches - 1:
+                print(f"  eval batch {bi + 1}/{n_batches} "
+                      f"({start + b:,}/{n:,} users) {time.time() - t0:.1f}s", flush=True)
+    print(f"  eval done: {n:,} users in {time.time() - t0:.1f}s "
+          f"({n / max(time.time() - t0, 1e-9):,.0f} users/s)", flush=True)
+    return {k: round(v / max(1, n), 4) for k, v in agg.items()}
 
 
 res_gate = eval_gate(test_inst)

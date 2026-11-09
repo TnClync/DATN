@@ -24,6 +24,7 @@ SEED = 42
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+EVAL_BATCH_USERS = 128   # eval: fuse this many users in ONE forward pass
 
 
 def find_base_dir():
@@ -44,6 +45,19 @@ def find_file(name):
     pref = [p for p in hits if "train-lightgcn" in str(p) or "graph-deep-hybrid" in str(p) or "deep-hybrid-recommender" in str(p)]
     return (pref[0] if pref else hits[0]) if hits else None
 
+def find_sbert_file(dim=768):
+    """Locate the 768-d combined SBERT artifact (older kernels also wrote 384-d copies)."""
+    hits = sorted(Path("/kaggle/input").rglob("sbert_item_embeddings_f16.npy"))
+    hits.sort(key=lambda p: 0 if "train-sbert" in str(p) else 1)
+    for p in hits:
+        try:
+            a = np.load(p, mmap_mode="r")
+            if a.ndim == 2 and a.shape[1] == dim:
+                return p
+        except Exception:
+            continue
+    return None
+
 
 BASE_DIR = find_base_dir()
 
@@ -52,8 +66,10 @@ user_cf = np.load(find_file("als_user_factors_f16.npy")).astype(np.float32)
 item_cf = np.load(find_file("als_item_factors_f16.npy")).astype(np.float32)
 graph_user = np.load(find_file("graph_user_factors_f16.npy")).astype(np.float32)
 graph_item = np.load(find_file("graph_item_factors_f16.npy")).astype(np.float32)
-item_sbert = np.load(find_file("sbert_item_embeddings_f16.npy"), mmap_mode="r")
-item_sbert = np.asarray(item_sbert[:CATALOG], dtype=np.float32)
+sbert_path = find_sbert_file()
+assert sbert_path is not None, "768-d sbert_item_embeddings_f16.npy not found - run the SBERT kernel first"
+item_sbert = np.asarray(np.load(sbert_path, mmap_mode="r")[:CATALOG], dtype=np.float32)
+print(f"SBERT item embeddings: {item_sbert.shape} | {sbert_path}")
 u_ids = np.load(find_file("user_ids.npy"))
 i_ids = np.load(find_file("item_ids.npy"))
 n_users, n_items = len(u_ids), len(i_ids)
@@ -255,24 +271,54 @@ for ep in range(30):
 torch.save(gate.state_dict(), OUT_DIR / "graph_light_gated_fusion.pt")
 
 
-def eval_gate(instances):
+def eval_gate(instances, batch_users=EVAL_BATCH_USERS):
+    """Batched eval: fuse B users x C candidates in ONE forward pass.
+
+    Gate is pointwise over (user, item), so scores are identical to the
+    per-user loop.
+    """
     gate.eval()
-    agg = {k: 0.0 for k in ["HR@5", "HR@10", "HR@20", "Recall@5", "Recall@10", "Recall@20",
-                             "NDCG@5", "NDCG@10", "NDCG@20", "MRR"]}
+    keys = ["HR@5", "HR@10", "HR@20", "Recall@5", "Recall@10", "Recall@20",
+            "NDCG@5", "NDCG@10", "NDCG@20", "MRR"]
+    agg = {k: 0.0 for k in keys}
+    n = len(instances)
+    n_batches = (n + batch_users - 1) // batch_users
+    t0 = time.time()
     with torch.no_grad():
-        for inst in instances:
-            u = inst["user"]; cands = inst["candidates"]; gt = inst["gt"]
-            bu = torch.tensor(np.repeat(graph_user[u][None, :], len(cands), axis=0), dtype=torch.float32).to(DEVICE)
-            bi = torch.tensor(graph_item[cands], dtype=torch.float32).to(DEVICE)
-            bs = torch.tensor(item_sbert[cands], dtype=torch.float32).to(DEVICE)
-            bcf = torch.tensor(cf_scores(graph_user, graph_item, u, cands), dtype=torch.float32).to(DEVICE)
-            bsb = torch.tensor(sb_scores(u, cands), dtype=torch.float32).to(DEVICE)
-            fused, _ = gate(bu, bi, bs, bcf, bsb)
-            ranked = cands[np.argsort(-fused.cpu().numpy())]
-            m = compute_metrics(ranked, gt)
-            for k in agg:
-                agg[k] += m[k]
-    return {k: round(v / max(1, len(instances)), 4) for k, v in agg.items()}
+        for bi, start in enumerate(range(0, n, batch_users)):
+            batch = instances[start:start + batch_users]
+            b = len(batch)
+            c = len(batch[0]["candidates"])
+            users = np.array([inst["user"] for inst in batch], dtype=np.int64)
+            cands = np.stack([inst["candidates"] for inst in batch])           # (B, C)
+
+            i_graph = graph_item[cands]                                        # (B, C, 32)
+            i_sb = item_sbert[cands]                                           # (B, C, 768)
+            u_graph = graph_user[users]                                        # (B, 32)
+            u_sb = np.stack([user_sbert[int(u)] for u in users])               # (B, 768)
+
+            bcf = np.einsum("bcd,bd->bc", i_graph, u_graph, optimize=True)
+            bsb = np.einsum("bcd,bd->bc", i_sb, u_sb, optimize=True)
+
+            fused, _ = gate(
+                torch.from_numpy(np.repeat(u_graph[:, None, :], c, axis=1)).to(DEVICE),
+                torch.from_numpy(i_graph).to(DEVICE),
+                torch.from_numpy(i_sb).to(DEVICE),
+                torch.from_numpy(bcf.astype(np.float32)).to(DEVICE),
+                torch.from_numpy(bsb.astype(np.float32)).to(DEVICE),
+            )
+            scores = fused.cpu().numpy()
+            for row in range(b):
+                ranked = cands[row][np.argsort(-scores[row])]
+                m = compute_metrics(ranked, batch[row]["gt"])
+                for k in keys:
+                    agg[k] += m[k]
+            if bi % 10 == 0 or bi == n_batches - 1:
+                print(f"  eval batch {bi + 1}/{n_batches} "
+                      f"({start + b:,}/{n:,} users) {time.time() - t0:.1f}s", flush=True)
+    print(f"  eval done: {n:,} users in {time.time() - t0:.1f}s "
+          f"({n / max(time.time() - t0, 1e-9):,.0f} users/s)", flush=True)
+    return {k: round(v / max(1, n), 4) for k, v in agg.items()}
 
 
 res_gate = eval_gate(test_inst)

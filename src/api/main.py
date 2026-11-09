@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..config import ARTIFACTS_DIR, RESULTS_DIR, NUM_USERS, NUM_ITEMS
+from ..config import ARTIFACTS_DIR, RESULTS_DIR, NUM_USERS, NUM_ITEMS, SBERT_DIM
 from ..serving.pipeline import RecommenderPipeline
 import numpy as np
 
@@ -307,11 +307,19 @@ def _load_sim_factors():
         gp = ARTIFACTS_DIR / "models" / "light_gated_fusion.pt"
         dp = ARTIFACTS_DIR / "models" / "deep_early_fusion.pt"
         if gp.exists():
-            m = AdaptiveLightGate(); m.load_state_dict(torch.load(gp, map_location="cpu")); m.eval()
-            _SIM_FACTORS["gate"] = m
+            try:
+                m = AdaptiveLightGate(); m.load_state_dict(torch.load(gp, map_location="cpu")); m.eval()
+                _SIM_FACTORS["gate"] = m
+            except Exception as exc:
+                print("light_gated head load failed, skip:", exc)
+                _SIM_FACTORS["gate"] = None
         if dp.exists():
-            m = DeepCrossFusion(); m.load_state_dict(torch.load(dp, map_location="cpu")); m.eval()
-            _SIM_FACTORS["deep"] = m
+            try:
+                m = DeepCrossFusion(); m.load_state_dict(torch.load(dp, map_location="cpu")); m.eval()
+                _SIM_FACTORS["deep"] = m
+            except Exception as exc:
+                print("deep_early head load failed, skip:", exc)
+                _SIM_FACTORS["deep"] = None
     return _SIM_FACTORS
 
 
@@ -389,7 +397,7 @@ def simulate(req: SimRequest):
 
     # SBERT user profiles
     sbert_emb = f["sbert_emb"]
-    usbert = np.zeros((U, 384), dtype=np.float32)
+    usbert = np.zeros((U, SBERT_DIM), dtype=np.float32)
     for i, h in enumerate(hists_sel):
         if h:
             v = sbert_emb[h].mean(axis=0)
@@ -408,7 +416,7 @@ def simulate(req: SimRequest):
     cf_als = score_cf(als_uf, als_it)
     cf_bpr = score_cf(bpr_uf, bpr_it)
     # sbert scores
-    sb_items = sbert_emb[cands]  # U x K x 384
+    sb_items = sbert_emb[cands]  # U x K x SBERT_DIM
     sb_scores = np.einsum("ukd,ud->uk", sb_items, usbert, optimize=True)
 
     def minmax_rows(x):
