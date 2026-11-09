@@ -12,115 +12,7 @@ import {
 } from 'lucide-react';
 
 // --- BENCHMARK DATA (100% THỰC NGHIỆM ĐÃ ĐO TRÊN TEST SET - 1 POS + 99 NEGS) ---
-const BENCHMARK_METRICS = [
-  {
-    model: 'Late Fusion (ALS + SBERT, α=1.0)',
-    type: 'Hybrid Baseline',
-    hr5: 0.5144,
-    hr10: 0.6153,
-    hr20: 0.7183,
-    ndcg5: 0.4081,
-    ndcg10: 0.4407,
-    ndcg20: 0.4668,
-    mrr: 0.3998,
-    timeSec: 1,
-    status: 'Verified Test Metric',
-    best: false,
-  },
-  {
-    model: 'ALS (implicit factors=32)',
-    type: 'Collaborative Filtering',
-    hr5: 0.5144,
-    hr10: 0.6153,
-    hr20: 0.7183,
-    ndcg5: 0.4081,
-    ndcg10: 0.4407,
-    ndcg20: 0.4668,
-    mrr: 0.3998,
-    timeSec: 294,
-    status: 'Verified Test Metric',
-    best: false,
-  },
-  {
-    model: 'BPR (implicit factors=32)',
-    type: 'Collaborative Filtering',
-    hr5: 0.5000,
-    hr10: 0.6144,
-    hr20: 0.7258,
-    ndcg5: 0.3731,
-    ndcg10: 0.4101,
-    ndcg20: 0.4383,
-    mrr: 0.3606,
-    timeSec: 155,
-    status: 'Verified Test Metric',
-    best: false,
-  },
-  {
-    model: 'SBERT (all-MiniLM-L6-v2)',
-    type: 'Content-Based (FAISS)',
-    hr5: 0.0705,
-    hr10: 0.1297,
-    hr20: 0.2408,
-    ndcg5: 0.0441,
-    ndcg10: 0.0630,
-    ndcg20: 0.0908,
-    mrr: 0.0662,
-    timeSec: 35,
-    status: 'Verified Test Metric',
-    best: false,
-  },
-  {
-    model: 'Two-Stage Retrieval (shared 200k catalog)',
-    type: 'Retrieval + Linear Rerank',
-    hr5: 0.0132,
-    hr10: 0.0228,
-    hr20: 0.0378,
-    ndcg5: 0.0083,
-    ndcg10: 0.0114,
-    ndcg20: 0.0151,
-    mrr: 0.0099,
-    timeSec: 1200,
-    status: 'Verified Test Metric (recall@100=6.86%)',
-    best: false,
-  },
-  {
-    model: 'Light Gated Late Fusion',
-    type: 'Deep Hybrid',
-    hr5: 0.4181,
-    hr10: 0.5245,
-    hr20: 0.6376,
-    ndcg5: 0.3154,
-    ndcg10: 0.3499,
-    ndcg20: 0.3784,
-    mrr: 0.3120,
-    timeSec: 1,
-    status: 'Verified Test Metric',
-    best: true,
-  },
-  {
-    model: 'Deep Early Fusion (DCN)',
-    type: 'Deep Hybrid',
-    hr5: 0.3875,
-    hr10: 0.4947,
-    hr20: 0.6083,
-    ndcg5: 0.2871,
-    ndcg10: 0.3217,
-    ndcg20: 0.3504,
-    mrr: 0.2854,
-    timeSec: 1,
-    status: 'Verified Test Metric',
-    best: false,
-  },
-];
-
-const PENDING_MODELS = [
-  {
-    model: 'Two-Stage Retrieval + Cross-Encoder Reranker',
-    type: 'Deep Hybrid (Ưu tiên 1)',
-    planned: 'Candidate Union (300) -> bge-reranker-v2-m3 / ms-marco reranking',
-    status: 'Đang triển khai notebook trên Kaggle GPU (minhteonguyn)',
-  },
-];
+import { BENCHMARK_METRICS, PENDING_MODELS } from './data/benchmark';
 
 interface ItemMeta {
   item_idx: number;
@@ -135,7 +27,7 @@ interface ItemMeta {
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [theme, setTheme] = useState<'dark' | 'light'>('light');
   const [activeTab, setActiveTab] = useState<'playground' | 'leaderboard' | 'architecture' | 'simulator'>('playground');
 
   // Recommendation parameters
@@ -682,20 +574,27 @@ export default function App() {
                           <h4 className="text-sm font-bold text-slate-100 group-hover:text-cyan-300 transition-colors line-clamp-2 leading-snug">
                             {item.title}
                           </h4>
-                          <div className="flex items-center gap-2 text-xs pt-1">
-                            <span className="text-amber-400 font-bold flex items-center gap-1">
-                              ★ {item.rating}
-                            </span>
-                            <span className={`text-[11px] ${textMuted}`}>
-                              ({item.reviews_count.toLocaleString()} đánh giá)
-                            </span>
-                            <span className="font-mono font-extrabold text-emerald-400 ml-auto text-sm">
-                              ${item.price}
-                            </span>
+                          <div className="flex items-center gap-2 text-xs pt-1 flex-wrap">
+                            {item.rating ? (
+                              <span className="text-amber-400 font-bold flex items-center gap-1">
+                                ★ {item.rating}
+                              </span>
+                            ) : null}
+                            {item.reviews_count ? (
+                              <span className={`text-[11px] ${textMuted}`}>
+                                ({Number(item.reviews_count).toLocaleString()} đánh giá)
+                              </span>
+                            ) : null}
+                            {item.price ? (
+                              <span className="font-mono font-extrabold text-emerald-400 ml-auto text-sm">
+                                {item.price}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
 
                         {/* Tags */}
+                        {Array.isArray(item.tags) && item.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-3">
                           {item.tags.map((tag, tIdx) => (
                             <span
@@ -708,6 +607,7 @@ export default function App() {
                             </span>
                           ))}
                         </div>
+                        )}
 
                         {/* Recommendation Explanation & Action */}
                         <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">

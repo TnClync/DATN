@@ -1,0 +1,18 @@
+{
+  "id": "nguynteo/train-sbert-metadata-reviewer-datn",
+  "title": "Train SBERT (Metadata + Reviewer) DATN",
+  "code_file": "train_sbert.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview",
+    "nguynteo/item-profile"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

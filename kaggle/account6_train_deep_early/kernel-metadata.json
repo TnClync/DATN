@@ -1,0 +1,22 @@
+{
+  "id": "nguynteo/train-deep_early-datn",
+  "title": "Train deep_early DATN",
+  "code_file": "train_deep_early.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview",
+    "nguynteo/item-profile"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "nguynteo/train-sbert-metadata-reviewer-datn",
+    "nguynteo/cf-als-bpr-implicit-datn",
+    "nguynteo/deep-hybrid-recommender-datn"
+  ]
+}

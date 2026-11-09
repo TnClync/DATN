@@ -102,28 +102,44 @@ def resolve_customer(customer_input: str | int | None, user_idx_input: int | Non
 
 
 def get_item_metadata(item_idx: int) -> dict[str, Any]:
-    rnd = random.Random(item_idx * 31337)
-    cat_idx = item_idx % len(CATEGORIES)
-    cat_name, cat_tags = CATEGORIES[cat_idx]
-    brand = BRANDS[item_idx % len(BRANDS)]
-    noun = NOUNS[item_idx % len(NOUNS)]
-    title = f"{brand} {noun} (Gen-{item_idx % 4 + 1})"
-    price = round(rnd.uniform(24.99, 399.99), 2)
-    rating = round(rnd.uniform(4.0, 5.0), 1)
-    reviews_count = rnd.randint(45, 9420)
-    selected_tags = rnd.sample(cat_tags, min(3, len(cat_tags)))
-    asin = f"B0{item_idx % 899999 + 100000:06d}{chr(65 + item_idx % 26)}"
-
+    # item_idx here is a COMPACT row index. Map to original item id first.
+    orig_idx = item_idx
+    try:
+        ids = np.load(ARTIFACTS_DIR / "factors" / "als_item_ids.npy")
+        if 0 <= item_idx < len(ids):
+            orig_idx = int(ids[item_idx])
+    except Exception:
+        pass
+    # Real metadata from SQLite DB (built from nguynteo/item-profile). No fabrication.
+    try:
+        conn = sqlite3.connect(str(ARTIFACTS_DIR / "item_metadata.db"))
+        row = conn.execute(
+            "SELECT asin, title, brand, category, price, description FROM items WHERE item_idx = ?",
+            (orig_idx,),
+        ).fetchone()
+        conn.close()
+        if row:
+            asin, title, brand, category, price, description = row
+            return {
+                "item_idx": item_idx,
+                "asin": asin or "",
+                "title": title or f"Item {item_idx}",
+                "brand": brand or "",
+                "category": category or "",
+                "price": price or "",
+                "description": (description or "")[:200],
+                "in_stock": True,
+            }
+    except Exception:
+        pass
     return {
         "item_idx": item_idx,
-        "asin": asin,
-        "title": title,
-        "brand": brand,
-        "category": cat_name,
-        "price": price,
-        "rating": rating,
-        "reviews_count": reviews_count,
-        "tags": selected_tags,
+        "asin": str(orig_idx),
+        "title": f"Item {item_idx}",
+        "brand": "",
+        "category": "",
+        "price": "",
+        "description": "",
         "in_stock": True,
     }
 

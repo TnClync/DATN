@@ -1,0 +1,22 @@
+{
+  "id": "nguynteo/train-light_gated-datn",
+  "title": "Train light_gated DATN",
+  "code_file": "train_light_gated.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview",
+    "nguynteo/item-profile"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "nguynteo/train-sbert-metadata-reviewer-datn",
+    "nguynteo/cf-als-bpr-implicit-datn",
+    "nguynteo/deep-hybrid-recommender-datn"
+  ]
+}

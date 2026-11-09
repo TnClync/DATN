@@ -1,0 +1,20 @@
+{
+  "id": "nguynteo/train-graph-deep-hybrid-datn",
+  "title": "Train Graph Deep Hybrid DATN",
+  "code_file": "train_graph_deep_hybrid.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview",
+    "nguynteo/item-profile"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
+}
