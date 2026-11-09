@@ -40,12 +40,23 @@ export default function App() {
   const [userHistory, setUserHistory] = useState<number[]>([]);
   const [recError, setRecError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [cartCount, setCartCount] = useState<number>(0);
+  const [cartItems, setCartItems] = useState<any[]>([]);
+  const [showCart, setShowCart] = useState<boolean>(false);
+  const [showWishlist, setShowWishlist] = useState<boolean>(false);
   const [modelStatus, setModelStatus] = useState<Record<string,string>>({});
   const [sbertDim, setSbertDim] = useState<number | null>(null);
-  const [wishlist, setWishlist] = useState<Set<number>>(new Set());
+  const [wishlistItems, setWishlistItems] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [historyInput, setHistoryInput] = useState<string>('');
+
+  const cartCount = cartItems.reduce((s, it) => s + (it.qty || 1), 0);
+  const wishlist = new Set(wishlistItems.map(it => it.item_idx));
+  const toggleWishlist = (item: any) => setWishlistItems(ws => ws.some(w => w.item_idx === item.item_idx) ? ws.filter(w => w.item_idx !== item.item_idx) : [...ws, item]);
+  const addToCart = (item: any) => setCartItems(cs => {
+    const i = cs.findIndex(c => c.item_idx === item.item_idx);
+    if (i >= 0) { const n=[...cs]; n[i]={...n[i], qty:(n[i].qty||1)+1}; return n; }
+    return [...cs, { ...item, qty: 1 }];
+  });
 
   // Simulator
   const [simUsers, setSimUsers] = useState<number>(2000);
@@ -136,11 +147,11 @@ export default function App() {
             <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="flex-1 bg-transparent outline-none text-sm" placeholder="Search recommended products..." />
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => wishlist.size && alert(`Wishlist: ${wishlist.size} item(s)`)} className={`p-2 rounded-lg border ${border} relative`} title="Wishlist">
+            <button onClick={() => { setShowWishlist(true); setShowCart(false); }} className={`p-2 rounded-lg border ${border} relative`} title="Wishlist">
               <Heart className={`h-5 w-5 ${wishlist.size ? 'text-pink-500 fill-pink-500' : ''}`} />
               {wishlist.size > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-pink-500 text-white text-[10px] flex items-center justify-center">{wishlist.size}</span>}
             </button>
-            <button className={`p-2 rounded-lg border ${border} relative`}>
+            <button onClick={() => { setShowCart(true); setShowWishlist(false); }} className={`p-2 rounded-lg border ${border} relative`} title="Cart">
               <ShoppingCart className="h-5 w-5" />
               {cartCount > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">{cartCount}</span>}
             </button>
@@ -202,7 +213,7 @@ export default function App() {
                     className="flex-1 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
                     {isLoading ? 'Loading...' : 'Get Recommendations'}
                   </button>
-                  <button onClick={() => { setHistoryInput(''); setSearchQuery(''); setCartCount(0); setWishlist(new Set()); setSelectedItem(null); }}
+                  <button onClick={() => { setHistoryInput(''); setSearchQuery(''); setCartItems([]); setWishlistItems([]); setSelectedItem(null); setShowCart(false); setShowWishlist(false); }}
                     className={`px-3 py-2 rounded-lg border ${border} text-sm`} title="Reset UI state"><RotateCcw className="h-4 w-4" /></button>
                 </div>
                 {recError && <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">{recError}</div>}
@@ -252,7 +263,7 @@ export default function App() {
                     <div key={item.item_idx} className={`${card} border rounded-xl overflow-hidden hover:shadow-md transition-shadow cursor-pointer`} onClick={() => setSelectedItem(item)}>
                       <div className={`h-36 ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center relative`}>
                         <Package className="h-12 w-12 text-slate-300" />
-                        <button onClick={(e) => { e.stopPropagation(); setWishlist(w => { const n = new Set(w); n.has(item.item_idx) ? n.delete(item.item_idx) : n.add(item.item_idx); return n; }); }}
+                        <button onClick={(e) => { e.stopPropagation(); toggleWishlist(item); }}
                           className={`absolute top-2 right-2 p-1.5 rounded-full ${isDark ? 'bg-slate-900' : 'bg-white'} border ${border}`}>
                           <Heart className={`h-4 w-4 ${wishlist.has(item.item_idx) ? 'text-pink-500 fill-pink-500' : 'text-slate-400'}`} />
                         </button>
@@ -263,7 +274,7 @@ export default function App() {
                         {item.brand && <div className="text-xs text-slate-500 mb-1">{item.brand}</div>}
                         <div className="flex items-center justify-between mt-2">
                           {item.price && <span className="font-bold text-emerald-600">{item.price}</span>}
-                          <button onClick={(e) => { e.stopPropagation(); setCartCount(c => c + 1); }} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
+                          <button onClick={(e) => { e.stopPropagation(); addToCart(item); }} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700">Add to Cart</button>
                         </div>
                       </div>
                     </div>
@@ -427,12 +438,53 @@ export default function App() {
               {selectedItem.description && <p className={`mt-2 text-xs ${muted}`}>{String(selectedItem.description).slice(0, 400)}</p>}
             </div>
             <div className="flex gap-2 mt-4">
-              <button onClick={() => { setCartCount(c => c + 1); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm">Add to Cart</button>
-              <button onClick={() => setWishlist(w => { const n = new Set(w); n.has(selectedItem.item_idx) ? n.delete(selectedItem.item_idx) : n.add(selectedItem.item_idx); return n; })}
+              <button onClick={() => { addToCart(selectedItem); }} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm">Add to Cart</button>
+              <button onClick={() => toggleWishlist(selectedItem)}
                 className={`px-4 py-2 rounded-lg border ${border} text-sm`}>
                 {wishlist.has(selectedItem.item_idx) ? 'Remove Wishlist' : 'Add to Wishlist'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(showCart || showWishlist) && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={() => { setShowCart(false); setShowWishlist(false); }}>
+          <div className={`${card} border-l w-full max-w-md h-full overflow-y-auto p-4`} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold">{showCart ? `Cart (${cartCount})` : `Wishlist (${wishlistItems.length})`}</h3>
+              <div className="flex gap-2">
+                <button onClick={() => showCart ? setCartItems([]) : setWishlistItems([])} className={`px-2 py-1 rounded border ${border} text-xs`}>Clear</button>
+                <button onClick={() => { setShowCart(false); setShowWishlist(false); }} className={`px-2 py-1 rounded border ${border} text-xs`}>Close</button>
+              </div>
+            </div>
+            {showCart ? (
+              cartItems.length === 0 ? <div className={`text-sm ${muted}`}>Cart is empty.</div> :
+              <div className="space-y-2">
+                {cartItems.map(it => (
+                  <div key={it.item_idx} className={`flex items-start justify-between gap-2 p-2 rounded border ${border}`}>
+                    <div className="text-sm"><div className="font-medium line-clamp-1">{it.title || `Item ${it.item_idx}`}</div><div className={`text-xs ${muted}`}>{it.price || ''} · qty {it.qty || 1}</div></div>
+                    <div className="flex gap-1">
+                      <button onClick={() => addToCart(it)} className={`px-2 py-1 rounded border ${border} text-xs`}>+</button>
+                      <button onClick={() => setCartItems(cs => cs.filter(c => c.item_idx !== it.item_idx))} className={`px-2 py-1 rounded border ${border} text-xs`}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              wishlistItems.length === 0 ? <div className={`text-sm ${muted}`}>Wishlist is empty.</div> :
+              <div className="space-y-2">
+                {wishlistItems.map(it => (
+                  <div key={it.item_idx} className={`flex items-start justify-between gap-2 p-2 rounded border ${border}`}>
+                    <div className="text-sm"><div className="font-medium line-clamp-1">{it.title || `Item ${it.item_idx}`}</div><div className={`text-xs ${muted}`}>{it.brand || it.category || ''}</div></div>
+                    <div className="flex gap-1">
+                      <button onClick={() => addToCart(it)} className="px-2 py-1 rounded bg-indigo-600 text-white text-xs">Add</button>
+                      <button onClick={() => toggleWishlist(it)} className={`px-2 py-1 rounded border ${border} text-xs`}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
