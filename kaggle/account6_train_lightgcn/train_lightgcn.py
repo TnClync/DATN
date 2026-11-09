@@ -4,6 +4,10 @@
 Run this BEFORE the graph_* per-model kernels.
 """
 import os, sys, time, json, math, gc, subprocess
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from pathlib import Path
 try:
@@ -147,4 +151,3 @@ np.save(OUT_DIR / "user_ids.npy", u_uniq)
 np.save(OUT_DIR / "item_ids.npy", i_uniq)
 print(f"[ARTIFACT SAVED] graph_user {graph_user.shape}, graph_item {graph_item.shape}")
 print("DONE")
-PY

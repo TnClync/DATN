@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 
 MIN_INTERACTIONS = 3
-CATALOG = 200_000
+CATALOG = 2464371
 SEED = 42
 BATCH = 1024
 DEEP_BATCH = 256

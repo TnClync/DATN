@@ -24,7 +24,7 @@ from scipy.sparse import csr_matrix, coo_matrix
 from tqdm import tqdm
 
 MIN_INTERACTIONS = 3
-CATALOG = 200_000
+CATALOG = 2464371
 SEED = 42
 GRAPH_DIM = 64
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
@@ -153,7 +153,7 @@ if profile_dir is not None:
             print("profile read err", f, e)
 print(f"Loaded real text for {len(item_text_map):,} items")
 
-SBERT_COVERAGE = min(n_items, 200_000)
+SBERT_COVERAGE = n_items
 CAND_POOL = np.arange(SBERT_COVERAGE)
 compact_to_orig = {idx: int(i_uniq[idx]) for idx in range(n_items)}
 

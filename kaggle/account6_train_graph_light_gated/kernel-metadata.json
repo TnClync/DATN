@@ -1,9 +1,9 @@
 {
   "id": "nguynteo/train-graph_light_gated-datn",
   "title": "Train graph_light_gated DATN",
-  "code_file": "train_graph_light_gated.py",
+  "code_file": "train_graph_light_gated.ipynb",
   "language": "python",
-  "kernel_type": "script",
+  "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "true",
   "enable_tpu": "false",

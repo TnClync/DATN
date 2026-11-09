@@ -1,9 +1,9 @@
 {
   "id": "nguynteo/train-two_tower-datn",
   "title": "Train two_tower DATN",
-  "code_file": "train_two_tower.py",
+  "code_file": "train_two_tower.ipynb",
   "language": "python",
-  "kernel_type": "script",
+  "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "true",
   "enable_tpu": "false",

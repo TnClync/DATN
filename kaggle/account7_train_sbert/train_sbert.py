@@ -1,32 +1,49 @@
 #!/usr/bin/env python
-"""Kaggle: Build SBERT embeddings (metadata + reviewer text) once.
+"""Kaggle: Build SBERT embeddings (metadata + reviewer text) once — FULL catalog (2.46M items).
 
-Saves:
-  - sbert_meta_embeddings_f16.npy     (384-dim, title+brand+category+description)
-  - sbert_review_embeddings_f16.npy   (384-dim, aggregated review_content)
-  - sbert_combined_embeddings_f16.npy (768-dim, concat)
-  - sbert_item_embeddings_f16.npy     (768-dim combined, primary)
-  - user_ids.npy, item_ids.npy
+Saves (all float16):
+  - sbert_meta_embeddings_f16.npy     (N x 384, title+brand+category+description)
+  - sbert_review_embeddings_f16.npy   (N x 384, aggregated review_content; meta emb reused when no review)
+  - sbert_item_embeddings_f16.npy     (N x 768, concat[meta, review] — PRIMARY for downstream kernels)
+  - user_ids.npy, item_ids.npy        (compact -> original idx mapping)
+
+Memory-safe: encodes in chunks into np.memmap files, never holds the full
+2.46M x 768 float32 matrix in RAM.
 """
 import os, sys, time, json, math, gc, subprocess
-from pathlib import Path
 try:
-    import torch, faiss, pyarrow.parquet as pq, sentence_transformers
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
+from pathlib import Path
+
+try:
+    import torch
+    import pyarrow.parquet as pq
+    from sentence_transformers import SentenceTransformer
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-        "sentence-transformers>=2.7", "faiss-cpu", "pyarrow", "scipy", "tqdm"])
-    import torch, faiss, pyarrow.parquet as pq, sentence_transformers
+        "sentence-transformers>=2.7", "pyarrow", "scipy", "tqdm"])
+    import torch
+    import pyarrow.parquet as pq
+    from sentence_transformers import SentenceTransformer
+
 import numpy as np
 import pandas as pd
-from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
 MIN_INTERACTIONS = 3
-CATALOG = 200_000
+CATALOG = None            # None -> use all compact items (full catalog)
 SEED = 42
-OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
+CHUNK = 100_000           # encode chunk size (items per forward pass batch group)
+OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts/sbert")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+T0 = time.time()
+def log(msg):
+    print(f"[{time.time() - T0:8.1f}s] {msg}", flush=True)
 
 
 def find_base_dir():
@@ -41,159 +58,215 @@ def find_base_dir():
     return Path("data")
 
 
-def find_item_profile_dir():
-    if Path("/kaggle/input").exists():
-        for p in Path("/kaggle/input").rglob("*.parquet"):
-            try:
-                import pyarrow.parquet as pq
-                cols = pq.read_schema(p).names
-                if "title" in cols and "item_idx" in cols:
-                    return p.parent
-            except Exception:
-                pass
+def find_dir_with_cols(required):
+    if not Path("/kaggle/input").exists():
+        return None
+    for p in Path("/kaggle/input").rglob("*.parquet"):
+        if "datasets/nguynteo/lastone" in str(p):
+            continue
+        try:
+            cols = pq.read_schema(p).names
+            if all(c in cols for c in required):
+                return p.parent
+        except Exception:
+            pass
     return None
 
 
-def find_review_dir():
-    if Path("/kaggle/input").exists():
-        for p in Path("/kaggle/input").rglob("*.parquet"):
-            try:
-                import pyarrow.parquet as pq
-                cols = pq.read_schema(p).names
-                if "review_content" in cols and "item_idx" in cols:
-                    return p.parent
-            except Exception:
-                pass
-    return None
-
-
+# ---------------------------------------------------------------------------
+# STEP 1/5 — compact indices (same protocol as CF / eval kernels)
+# ---------------------------------------------------------------------------
+log("STEP 1/5 — building compact indices")
 BASE_DIR = find_base_dir()
-print("Dataset:", BASE_DIR)
+log(f"dataset dir: {BASE_DIR}")
 
-# ---- Compact indices ----
 train_files = sorted(BASE_DIR.glob("train/*.parquet"))
+log(f"train parquet files: {len(train_files)}")
 dfs = []
 for f in tqdm(train_files, desc="Reading train"):
     d = pq.read_table(f, columns=["user_idx", "item_idx", "rating"]).to_pandas()
     d = d[d["rating"] >= 4.0]
     dfs.append(d[["user_idx", "item_idx"]])
 train_df = pd.concat(dfs, ignore_index=True)
+del dfs
 user_counts = train_df["user_idx"].value_counts()
 active = user_counts[user_counts >= MIN_INTERACTIONS].index
 train_df = train_df[train_df["user_idx"].isin(active)]
+
 u_raw = train_df["user_idx"].to_numpy(np.int64)
 i_raw = train_df["item_idx"].to_numpy(np.int64)
-u_uniq, u_inv = np.unique(u_raw, return_inverse=True)
-i_uniq, i_inv = np.unique(i_raw, return_inverse=True)
+u_uniq, _ = np.unique(u_raw, return_inverse=True)
+i_uniq, _ = np.unique(i_raw, return_inverse=True)
 n_users, n_items = len(u_uniq), len(i_uniq)
-SBERT_COVERAGE = min(n_items, CATALOG)
-compact_to_orig = {idx: int(i_uniq[idx]) for idx in range(n_items)}
-print(f"Compact: {n_users:,} users x {n_items:,} items, coverage {SBERT_COVERAGE:,}")
+del train_df, u_raw, i_raw, user_counts, active
+gc.collect()
 
+if CATALOG is not None:
+    n_items = min(n_items, CATALOG)
+compact_to_orig = i_uniq[:n_items].astype(np.int64)
+log(f"compact: {n_users:,} users x {n_items:,} items (min_interactions={MIN_INTERACTIONS})")
 
-# ---- SBERT METADATA ----
-print("\n" + "=" * 50)
-print("SBERT METADATA (title+brand+category+description)")
-print("=" * 50)
-profile_dir = find_item_profile_dir()
-print("Profile dir:", profile_dir)
+# ---------------------------------------------------------------------------
+# STEP 2/5 — real item metadata text
+# ---------------------------------------------------------------------------
+log("STEP 2/5 — loading real item metadata (title/brand/category/description)")
+profile_dir = find_dir_with_cols(["item_idx", "title", "brand", "category", "description"])
+log(f"profile dir: {profile_dir}")
+
 item_text_map = {}
 if profile_dir is not None:
     for f in sorted(profile_dir.glob("*.parquet")):
         try:
-            t = pq.read_table(f, columns=["item_idx", "title", "brand", "category", "description"])
-            d = t.to_pandas()
-            for _, r in d.iterrows():
-                parts = []
-                if isinstance(r.get("title"), str) and r["title"].strip():
-                    parts.append(r["title"].strip())
-                if isinstance(r.get("brand"), str) and r["brand"].strip() and "amazon" not in r["brand"].lower():
-                    parts.append(r["brand"].strip())
-                if isinstance(r.get("category"), str) and r["category"].strip():
-                    parts.append(r["category"].strip())
-                desc = r.get("description")
-                if isinstance(desc, str) and desc.strip():
-                    parts.append(desc.strip()[:300])
-                txt = " | ".join(parts)
-                if txt:
-                    item_text_map[int(r["item_idx"])] = txt
+            d = pq.read_table(f, columns=["item_idx", "title", "brand", "category", "description"]).to_pandas()
         except Exception as e:
-            print("profile read err", f, e)
-print(f"Loaded real text for {len(item_text_map):,} items")
+            log(f"  skip {f.name}: {e}")
+            continue
+        ii = d["item_idx"].to_numpy(np.int64)
+        tt = d["title"].to_numpy()
+        bb = d["brand"].to_numpy()
+        cc = d["category"].to_numpy()
+        dd = d["description"].to_numpy()
+        for k in range(len(ii)):
+            parts = []
+            t, b, c, x = tt[k], bb[k], cc[k], dd[k]
+            if isinstance(t, str) and t.strip():
+                parts.append(t.strip())
+            if isinstance(b, str) and b.strip() and "amazon" not in b.lower():
+                parts.append(b.strip())
+            if isinstance(c, str) and c.strip():
+                parts.append(c.strip())
+            if isinstance(x, str) and x.strip():
+                parts.append(x.strip()[:300])
+            txt = " | ".join(parts)
+            if txt:
+                item_text_map[int(ii[k])] = txt
+        del d
+    log(f"real text loaded for {len(item_text_map):,} items")
 
-meta_texts = []
-for ci in range(SBERT_COVERAGE):
-    orig = compact_to_orig[ci]
-    meta_texts.append(item_text_map.get(orig, f"Product item {orig}"))
+n_with_text = 0
+for ci in range(n_items):
+    if int(compact_to_orig[ci]) in item_text_map:
+        n_with_text += 1
+log(f"coverage: {n_with_text:,}/{n_items:,} items have real text; rest use fallback 'Product item <id>'")
 
-print(f"Encoding {len(meta_texts)} items (metadata)...")
-sbert_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=str(DEVICE))
-meta_embs = sbert_model.encode(meta_texts, batch_size=512, show_progress_bar=True,
-                               convert_to_numpy=True, normalize_embeddings=True)
-item_sbert_meta = np.zeros((n_items, 384), dtype=np.float32)
-item_sbert_meta[:SBERT_COVERAGE] = meta_embs
-del meta_embs
+# ---------------------------------------------------------------------------
+# STEP 3/5 — encode metadata (chunked, memmap output)
+# ---------------------------------------------------------------------------
+log(f"STEP 3/5 — encoding metadata embeddings on {DEVICE} (chunk={CHUNK:,})")
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=str(DEVICE))
+
+meta_path = OUT_DIR / "sbert_meta_embeddings_f16.npy"
+meta_mm = np.lib.format.open_memmap(meta_path, mode="w+", dtype=np.float16, shape=(n_items, 384))
+
+for start in range(0, n_items, CHUNK):
+    end = min(start + CHUNK, n_items)
+    texts = [item_text_map.get(int(compact_to_orig[ci]), f"Product item {int(compact_to_orig[ci])}")
+             for ci in range(start, end)]
+    embs = model.encode(texts, batch_size=512, show_progress_bar=False,
+                        convert_to_numpy=True, normalize_embeddings=True)
+    meta_mm[start:end] = embs.astype(np.float16)
+    del texts, embs
+    log(f"  metadata {end:,}/{n_items:,} ({100.0 * end / n_items:5.1f}%)")
+meta_mm.flush()
+del meta_mm
 gc.collect()
 
+# ---------------------------------------------------------------------------
+# STEP 4/5 — reviewer text embeddings
+# ---------------------------------------------------------------------------
+log("STEP 4/5 — loading reviewer text (review_content)")
+review_dir = find_dir_with_cols(["item_idx", "review_content"])
+log(f"review dir: {review_dir}")
 
-# ---- SBERT REVIEWER TEXT ----
-print("\n" + "=" * 50)
-print("SBERT REVIEWER TEXT (aggregated review_content)")
-print("=" * 50)
-review_dir = find_review_dir()
-print("Review dir:", review_dir)
+MAX_REVIEWS_PER_ITEM = 3
+MAX_REVIEW_CHARS = 500
 review_by_item = {}
+n_review_rows = 0
 if review_dir is not None:
     for f in sorted(review_dir.glob("*.parquet")):
         try:
-            t = pq.read_table(f, columns=["item_idx", "review_content"])
-            d = t.to_pandas()
-            for _, r in d.iterrows():
-                ci_raw = int(r["item_idx"])
-                # map original item_idx -> compact
-                # (review_dir uses original item_idx; need compact index)
-                txt = r.get("review_content")
-                if isinstance(txt, str) and txt.strip():
-                    review_by_item.setdefault(ci_raw, []).append(txt.strip()[:500])
+            d = pq.read_table(f, columns=["item_idx", "review_content"]).to_pandas()
         except Exception as e:
-            print("review read err", f, e)
-print(f"Items with reviews (raw idx): {len(review_by_item):,}")
+            log(f"  skip {f.name}: {e}")
+            continue
+        ii = d["item_idx"].to_numpy(np.int64)
+        rr = d["review_content"].to_numpy()
+        for k in range(len(ii)):
+            txt = rr[k]
+            if not isinstance(txt, str) or not txt.strip():
+                continue
+            lst = review_by_item.setdefault(int(ii[k]), [])
+            if len(lst) < MAX_REVIEWS_PER_ITEM:
+                lst.append(txt.strip()[:MAX_REVIEW_CHARS])
+            n_review_rows += 1
+        del d
+    log(f"{n_review_rows:,} review rows -> {len(review_by_item):,} items")
 
-# Map original item_idx -> compact index
-orig_to_compact = {int(i_uniq[idx]): idx for idx in range(n_items)}
+meta_mm = np.load(meta_path, mmap_mode="r")
+review_path = OUT_DIR / "sbert_review_embeddings_f16.npy"
+review_mm = np.lib.format.open_memmap(review_path, mode="w+", dtype=np.float16, shape=(n_items, 384))
 
-review_texts = []
-for ci in range(SBERT_COVERAGE):
-    orig = compact_to_orig[ci]
-    revs = review_by_item.get(orig, [])
-    if revs:
-        txt = " ".join(revs[:3])[:1000]
-    else:
-        txt = meta_texts[ci]  # fallback to metadata text
-    review_texts.append(txt)
-
-print(f"Encoding {len(review_texts)} items (reviewer)...")
-review_embs = sbert_model.encode(review_texts, batch_size=512, show_progress_bar=True,
-                                 convert_to_numpy=True, normalize_embeddings=True)
-item_sbert_review = np.zeros((n_items, 384), dtype=np.float32)
-item_sbert_review[:SBERT_COVERAGE] = review_embs
-del review_embs
+for start in range(0, n_items, CHUNK):
+    end = min(start + CHUNK, n_items)
+    enc_idx, enc_txt, reuse_idx = [], [], []
+    for ci in range(start, end):
+        revs = review_by_item.get(int(compact_to_orig[ci]))
+        if revs:
+            enc_idx.append(ci)
+            enc_txt.append(" ".join(revs)[:1000])
+        else:
+            reuse_idx.append(ci)
+    if reuse_idx:
+        idx = np.asarray(reuse_idx, dtype=np.int64)
+        review_mm[idx] = meta_mm[idx]          # identical text -> identical embedding
+    if enc_idx:
+        embs = model.encode(enc_txt, batch_size=512, show_progress_bar=False,
+                            convert_to_numpy=True, normalize_embeddings=True)
+        review_mm[np.asarray(enc_idx, dtype=np.int64)] = embs.astype(np.float16)
+        del embs
+    del enc_idx, enc_txt, reuse_idx
+    log(f"  reviewer {end:,}/{n_items:,} ({100.0 * end / n_items:5.1f}%)")
+review_mm.flush()
+del review_mm, meta_mm
 gc.collect()
 
-# ---- Combined (768-dim) ----
-item_sbert_combined = np.concatenate([item_sbert_meta, item_sbert_review], axis=1).astype(np.float32)
+# ---------------------------------------------------------------------------
+# STEP 5/5 — concat -> primary 768-dim embedding file, save ids
+# ---------------------------------------------------------------------------
+log("STEP 5/5 — writing combined 768-dim embeddings (memmap, no extra RAM)")
+meta_mm = np.load(meta_path, mmap_mode="r")
+review_mm = np.load(review_path, mmap_mode="r")
+comb_path = OUT_DIR / "sbert_item_embeddings_f16.npy"
+comb_mm = np.lib.format.open_memmap(comb_path, mode="w+", dtype=np.float16, shape=(n_items, 768))
+for start in range(0, n_items, CHUNK):
+    end = min(start + CHUNK, n_items)
+    comb_mm[start:end, :384] = meta_mm[start:end]
+    comb_mm[start:end, 384:] = review_mm[start:end]
+comb_mm.flush()
+del comb_mm, meta_mm, review_mm
+gc.collect()
 
-# ---- Save ----
-np.save(OUT_DIR / "sbert_meta_embeddings_f16.npy", item_sbert_meta.astype(np.float16))
-np.save(OUT_DIR / "sbert_review_embeddings_f16.npy", item_sbert_review.astype(np.float16))
-np.save(OUT_DIR / "sbert_combined_embeddings_f16.npy", item_sbert_combined.astype(np.float16))
-np.save(OUT_DIR / "sbert_item_embeddings_f16.npy", item_sbert_combined.astype(np.float16))  # primary = combined
 np.save(OUT_DIR / "user_ids.npy", u_uniq)
 np.save(OUT_DIR / "item_ids.npy", i_uniq)
+np.save(OUT_DIR / "compact_to_orig.npy", compact_to_orig)
 
-print(f"\nSaved:")
-print(f"  meta:     {item_sbert_meta.shape}")
-print(f"  review:   {item_sbert_review.shape}")
-print(f"  combined: {item_sbert_combined.shape}")
-print("DONE")
-PY
+summary = {
+    "n_users": int(n_users),
+    "n_items": int(n_items),
+    "items_with_real_text": int(n_with_text),
+    "items_with_reviews": int(len(review_by_item)),
+    "review_rows": int(n_review_rows),
+    "dims_meta": 384,
+    "dims_review": 384,
+    "dims_combined": 768,
+    "dtype": "float16",
+    "device": str(DEVICE),
+    "elapsed_sec": round(time.time() - T0, 1),
+}
+(OUT_DIR / "sbert_summary.json").write_text(json.dumps(summary, indent=2))
+
+log("saved files:")
+for p in sorted(OUT_DIR.glob("*")):
+    if p.is_file():
+        log(f"  {p.name:42s} {p.stat().st_size / 1e6:9.1f} MB")
+log("DONE")

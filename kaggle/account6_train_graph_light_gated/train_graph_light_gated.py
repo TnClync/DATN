@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 """Kaggle: Train Graph Light Gated (single model). Loads LightGCN+SBERT from graph kernel output."""
 import os, sys, time, json, math, gc, subprocess
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 from pathlib import Path
 try:
     import torch, faiss, pyarrow.parquet as pq, implicit, sentence_transformers
@@ -15,7 +19,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 MIN_INTERACTIONS = 3
-CATALOG = 200_000
+CATALOG = 2464371
 SEED = 42
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -53,7 +57,7 @@ item_sbert = np.asarray(item_sbert[:CATALOG], dtype=np.float32)
 u_ids = np.load(find_file("user_ids.npy"))
 i_ids = np.load(find_file("item_ids.npy"))
 n_users, n_items = len(u_ids), len(i_ids)
-SBERT_COVERAGE = CATALOG
+SBERT_COVERAGE = n_items
 
 # ---- Train history + test ----
 train_files = sorted(BASE_DIR.glob("train/*.parquet"))

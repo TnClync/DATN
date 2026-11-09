@@ -5,6 +5,10 @@ Deep hybrid: neural gate learns per-(user,item) fusion weight between
 ALS (CF) score and SBERT (content) score.
 """
 import os, sys, time, json, math, gc, subprocess
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 from pathlib import Path
 
 try:
@@ -22,7 +26,7 @@ from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
 MIN_INTERACTIONS = 3
-CATALOG = 200_000
+CATALOG = 2464371
 SEED = 42
 OUT_DIR = Path("/kaggle/working" if Path("/kaggle/working").exists() else "artifacts")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -364,4 +368,3 @@ summary = {
 print(json.dumps(summary, indent=2))
 print("DONE", flush=True)
 print("[ARTIFACT SAVED]", flush=True)
-PY
