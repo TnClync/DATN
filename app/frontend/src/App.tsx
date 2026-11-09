@@ -250,12 +250,12 @@ export default function App() {
               <div className={`${card} border rounded-xl p-4`}>
                 <div className="text-xs text-slate-500 mb-1">Eval Users</div>
                 <div className="text-lg font-bold">299,455</div>
-                <div className="text-xs text-slate-500 font-mono mt-1">Eligible test users</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Eligible test users · full test set, no sample</div>
               </div>
               <div className={`${card} border rounded-xl p-4`}>
                 <div className="text-xs text-slate-500 mb-1">Catalog</div>
                 <div className="text-lg font-bold">200,000</div>
-                <div className="text-xs text-slate-500 font-mono mt-1">Shared items</div>
+                <div className="text-xs text-slate-500 font-mono mt-1">Shared retrieval catalog · SBERT 200k</div>
               </div>
               <div className={`${card} border rounded-xl p-4`}>
                 <div className="text-xs text-slate-500 mb-1">Min Interactions</div>
