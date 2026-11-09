@@ -231,6 +231,8 @@ def recommend(req: RecommendRequest):
     latency_ms = round((time.perf_counter() - t0) * 1000, 2)
     items_meta = [get_item_metadata(it) for it in items]
 
+    ms = getattr(pl, "head_status", {}) or {}
+    sdim = int(pl.sbert_emb.shape[1]) if getattr(pl, "sbert_emb", None) is not None and hasattr(pl.sbert_emb, "shape") else None
     return {
         "customer_id": cid,
         "user_idx": uidx,
@@ -241,6 +243,8 @@ def recommend(req: RecommendRequest):
         "latency_ms": latency_ms,
         "items": items,
         "items_meta": items_meta,
+        "model_status": {k: v for k, v in ms.items() if k in (req.model, "light_gated", "deep_early")} if ms else {},
+        "sbert_dim": sdim,
     }
 
 
@@ -324,14 +328,20 @@ def _load_sim_factors():
         dp = ARTIFACTS_DIR / "models" / "deep_early_fusion.pt"
         if gp.exists():
             try:
-                m = AdaptiveLightGate(); m.load_state_dict(torch.load(gp, map_location="cpu")); m.eval()
+                sd = torch.load(gp, map_location="cpu")
+                sd = sd.get("state_dict", sd) if isinstance(sd, dict) else sd
+                in_f = int(sd["gate_net.0.weight"].shape[1]) if "gate_net.0.weight" in sd else 32 + 32 + int(_SIM_FACTORS["sbert_emb"].shape[1])
+                m = AdaptiveLightGate(in_features=in_f); m.load_state_dict(sd); m.eval()
                 _SIM_FACTORS["gate"] = m
             except Exception as exc:
                 print("light_gated head load failed, skip:", exc)
                 _SIM_FACTORS["gate"] = None
         if dp.exists():
             try:
-                m = DeepCrossFusion(); m.load_state_dict(torch.load(dp, map_location="cpu")); m.eval()
+                sd = torch.load(dp, map_location="cpu")
+                sd = sd.get("state_dict", sd) if isinstance(sd, dict) else sd
+                in_d = int(sd["cross.0.weight"].shape[1]) if "cross.0.weight" in sd else 32 + 32 + int(_SIM_FACTORS["sbert_emb"].shape[1])
+                m = DeepCrossFusion(in_dim=in_d); m.load_state_dict(sd); m.eval()
                 _SIM_FACTORS["deep"] = m
             except Exception as exc:
                 print("deep_early head load failed, skip:", exc)
@@ -411,12 +421,13 @@ def simulate(req: SimRequest):
     hists_sel = [hists[i] for i in range(n) if mask[i]]
     U = len(cands)
 
-    # SBERT user profiles
+    # SBERT user profiles (infer dim from artifact for compatibility)
     sbert_emb = f["sbert_emb"]
-    usbert = np.zeros((U, SBERT_DIM), dtype=np.float32)
+    sdim = int(sbert_emb.shape[1]) if hasattr(sbert_emb, 'shape') and sbert_emb.ndim == 2 else SBERT_DIM
+    usbert = np.zeros((U, sdim), dtype=np.float32)
     for i, h in enumerate(hists_sel):
         if h:
-            v = sbert_emb[h].mean(axis=0)
+            v = np.asarray(sbert_emb[h], dtype=np.float32).mean(axis=0)
             nn_ = np.linalg.norm(v)
             usbert[i] = (v / nn_) if nn_ > 1e-8 else 0.0
 

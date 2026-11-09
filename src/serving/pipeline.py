@@ -45,6 +45,7 @@ class RecommenderPipeline:
         self.item_text_fn = lambda i: f"item {i}"
         self._loaded = False
         self._available = False
+        self.head_status = {}
 
     # ------------------------------------------------------------------ load
     def load(self):
@@ -89,24 +90,35 @@ class RecommenderPipeline:
             self.faiss_index = None
             self.sbert_index_ids = None
 
-        # Deep hybrid heads (trained on Kaggle, reuse CF factors)
+        # Deep hybrid heads (trained on Kaggle, reuse CF factors) — infer dims from checkpoint
+        self.head_status = {}
         if torch is not None:
             gate_p = MODELS_DIR / "light_gated_fusion.pt"
             deep_p = MODELS_DIR / "deep_early_fusion.pt"
             try:
                 if gate_p.exists() and AdaptiveLightGate is not None:
-                    self.gate_model = AdaptiveLightGate()
-                    self.gate_model.load_state_dict(torch.load(gate_p, map_location="cpu"))
+                    sd = torch.load(gate_p, map_location="cpu")
+                    sd = sd.get("state_dict", sd) if isinstance(sd, dict) else sd
+                    in_f = int(sd["gate_net.0.weight"].shape[1]) if "gate_net.0.weight" in sd else 32 + 32 + (int(self.sbert_emb.shape[1]) if self.sbert_emb is not None else SBERT_DIM)
+                    self.gate_model = AdaptiveLightGate(in_features=in_f)
+                    self.gate_model.load_state_dict(sd)
                     self.gate_model.eval()
-            except Exception:
+                    self.head_status["light_gated"] = f"loaded(in_features={in_f})"
+            except Exception as e:
                 self.gate_model = None
+                self.head_status["light_gated"] = f"unavailable: {e}"
             try:
                 if deep_p.exists() and DeepCrossFusion is not None:
-                    self.deep_model = DeepCrossFusion()
-                    self.deep_model.load_state_dict(torch.load(deep_p, map_location="cpu"))
+                    sd = torch.load(deep_p, map_location="cpu")
+                    sd = sd.get("state_dict", sd) if isinstance(sd, dict) else sd
+                    in_d = int(sd["cross.0.weight"].shape[1]) if "cross.0.weight" in sd else 32 + 32 + (int(self.sbert_emb.shape[1]) if self.sbert_emb is not None else SBERT_DIM)
+                    self.deep_model = DeepCrossFusion(in_dim=in_d)
+                    self.deep_model.load_state_dict(sd)
                     self.deep_model.eval()
-            except Exception:
+                    self.head_status["deep_early"] = f"loaded(in_dim={in_d})"
+            except Exception as e:
                 self.deep_model = None
+                self.head_status["deep_early"] = f"unavailable: {e}"
 
         if self.use_reranker:
             try:
@@ -252,7 +264,8 @@ class RecommenderPipeline:
             i_sb = np.asarray(self.sbert_emb[cands_arr], dtype=np.float32)
             sb_raw = i_sb @ u_sb
         else:
-            i_sb = np.zeros((len(cands), SBERT_DIM), dtype=np.float32)
+            sdim = int(self.sbert_emb.shape[1]) if self.sbert_emb is not None and hasattr(self.sbert_emb, 'shape') else SBERT_DIM
+            i_sb = np.zeros((len(cands), sdim), dtype=np.float32)
             sb_raw = np.zeros(len(cands), dtype=np.float32)
 
         if model == "light_gated" and self.gate_model is not None and torch is not None:
