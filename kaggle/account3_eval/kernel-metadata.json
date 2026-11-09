@@ -1,9 +1,9 @@
 {
   "id": "nguynteo/eval-all-recommender-models-datn",
   "title": "Eval All Recommender Models DATN",
-  "code_file": "eval_all.py",
+  "code_file": "eval_all.ipynb",
   "language": "python",
-  "kernel_type": "script",
+  "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "false",
   "enable_tpu": "false",

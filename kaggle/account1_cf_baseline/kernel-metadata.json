@@ -1,9 +1,9 @@
 {
   "id": "nguyenteo/cf-als-bpr-implicit-datn",
   "title": "CF ALS BPR Implicit DATN",
-  "code_file": "train_cf.py",
+  "code_file": "train_cf.ipynb",
   "language": "python",
-  "kernel_type": "script",
+  "kernel_type": "notebook",
   "is_private": "true",
   "enable_gpu": "false",
   "enable_tpu": "false",

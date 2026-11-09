@@ -32,6 +32,7 @@ except ImportError:
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
 MIN_INTERACTIONS = 3
 CATALOG = None            # None -> use all compact items (full catalog)
@@ -153,7 +154,34 @@ log(f"coverage: {n_with_text:,}/{n_items:,} items have real text; rest use fallb
 # STEP 3/5 — encode metadata (chunked, memmap output)
 # ---------------------------------------------------------------------------
 log(f"STEP 3/5 — encoding metadata embeddings on {DEVICE} (chunk={CHUNK:,})")
-model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2", device=str(DEVICE))
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Kaggle "GPU T4 x2" exposes 2 devices: run one model replica per GPU in
+# threads and split each batch group across them (~1.7-2x encode speedup).
+N_GPU = torch.cuda.device_count() if DEVICE.type == "cuda" else 0
+log(f"CUDA devices: {N_GPU} -> {[torch.cuda.get_device_name(i) for i in range(N_GPU)]}")
+
+MODELS = [SentenceTransformer(MODEL_NAME, device=str(DEVICE))]
+for gi in range(1, N_GPU):
+    MODELS.append(SentenceTransformer(MODEL_NAME, device=f"cuda:{gi}"))
+log(f"encode replicas: {len(MODELS)} ({[str(m.device) for m in MODELS]})")
+
+
+def _run_encode(mdl, texts, batch_size):
+    return mdl.encode(texts, batch_size=batch_size, show_progress_bar=False,
+                       convert_to_numpy=True, normalize_embeddings=True)
+
+
+def encode_texts(texts, batch_size=512):
+    if len(MODELS) == 1:
+        return _run_encode(MODELS[0], texts, batch_size)
+    bounds = np.linspace(0, len(texts), len(MODELS) + 1).astype(int)
+    jobs = [(i, texts[bounds[i]:bounds[i + 1]]) for i in range(len(MODELS)) if bounds[i + 1] > bounds[i]]
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        futs = [ex.submit(_run_encode, MODELS[i], part, batch_size) for i, part in jobs]
+        parts = [f.result() for f in futs]
+    return np.concatenate(parts, axis=0)
+
 
 meta_path = OUT_DIR / "sbert_meta_embeddings_f16.npy"
 meta_mm = np.lib.format.open_memmap(meta_path, mode="w+", dtype=np.float16, shape=(n_items, 384))
@@ -162,8 +190,7 @@ for start in range(0, n_items, CHUNK):
     end = min(start + CHUNK, n_items)
     texts = [item_text_map.get(int(compact_to_orig[ci]), f"Product item {int(compact_to_orig[ci])}")
              for ci in range(start, end)]
-    embs = model.encode(texts, batch_size=512, show_progress_bar=False,
-                        convert_to_numpy=True, normalize_embeddings=True)
+    embs = encode_texts(texts)
     meta_mm[start:end] = embs.astype(np.float16)
     del texts, embs
     log(f"  metadata {end:,}/{n_items:,} ({100.0 * end / n_items:5.1f}%)")
@@ -220,8 +247,7 @@ for start in range(0, n_items, CHUNK):
         idx = np.asarray(reuse_idx, dtype=np.int64)
         review_mm[idx] = meta_mm[idx]          # identical text -> identical embedding
     if enc_idx:
-        embs = model.encode(enc_txt, batch_size=512, show_progress_bar=False,
-                            convert_to_numpy=True, normalize_embeddings=True)
+        embs = encode_texts(enc_txt)
         review_mm[np.asarray(enc_idx, dtype=np.int64)] = embs.astype(np.float16)
         del embs
     del enc_idx, enc_txt, reuse_idx
@@ -261,6 +287,7 @@ summary = {
     "dims_combined": 768,
     "dtype": "float16",
     "device": str(DEVICE),
+    "cuda_devices": int(N_GPU),
     "elapsed_sec": round(time.time() - T0, 1),
 }
 (OUT_DIR / "sbert_summary.json").write_text(json.dumps(summary, indent=2))

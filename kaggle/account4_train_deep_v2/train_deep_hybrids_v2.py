@@ -580,4 +580,3 @@ summary = {
 (OUT_DIR / "deep_hybrids_v2_summary.json").write_text(json.dumps(summary, indent=2))
 print(json.dumps(summary, indent=2))
 print("DONE")
-PY
