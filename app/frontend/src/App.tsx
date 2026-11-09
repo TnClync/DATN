@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { fetchSampleUsers, fetchRecommendations, fetchMetrics, runSimulation } from './services/api';
 import { BENCHMARK_METRICS, PENDING_MODELS } from './data/benchmark';
+import ArchitectureDiagram from './components/ArchitectureDiagram';
+import ModelArchitectureDiagram from './components/ModelArchitectureDiagram';
 import type { Product, SampleUser, ResolvedUser, SimResult } from './types';
 
 const MODELS = [
@@ -361,8 +363,9 @@ export default function App() {
         )}
 
         {activeTab === 'architecture' && (
-          <div className="max-w-5xl mx-auto">
+          <div className="max-w-5xl mx-auto space-y-6">
             <ArchitectureDiagram isDark={isDark} />
+            <ModelArchitectureDiagram isDark={isDark} />
           </div>
         )}
       </main>
