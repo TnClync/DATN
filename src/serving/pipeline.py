@@ -56,6 +56,12 @@ class RecommenderPipeline:
             self.user_factors = uf
             self.item_factors = itf
             self._available = True
+            # popular items for cold-start (top by factor norm)
+            try:
+                norms = np.linalg.norm(np.asarray(itf, dtype=np.float32), axis=1)
+                self.popular_items = np.argsort(-norms)[:200].tolist()
+            except Exception:
+                self.popular_items = list(range(min(200, len(itf))))
         except Exception:
             self.user_factors = None
             self.item_factors = None
@@ -115,11 +121,11 @@ class RecommenderPipeline:
             pos = int(np.searchsorted(self.user_ids, user_idx))
             if pos < len(self.user_ids) and int(self.user_ids[pos]) == int(user_idx):
                 return pos
+            return -1
         if self.user_factors is not None and len(self.user_factors) > 0:
             if 0 <= user_idx < len(self.user_factors):
                 return user_idx
-            return user_idx % len(self.user_factors)
-        return 0
+        return -1
 
     def _item_row(self, item_orig: int) -> int | None:
         if self.item_ids is not None and len(self.item_ids) > 0:
@@ -132,6 +138,9 @@ class RecommenderPipeline:
     # ------------------------------------------------------------------ score
     def _user_cf_vec(self, user_idx: int) -> np.ndarray:
         row = self._user_row_idx(user_idx)
+        if row < 0 or self.user_factors is None:
+            d = self.item_factors.shape[1] if self.item_factors is not None else 32
+            return np.zeros(d, dtype=np.float32)
         return np.asarray(self.user_factors[row], dtype=np.float32)
 
     def _user_sbert_vec(self, hist_rows: list[int] | None) -> np.ndarray | None:
@@ -144,6 +153,10 @@ class RecommenderPipeline:
 
     def cf_topk(self, user_idx: int, k: int = 200, exclude: set[int] | None = None):
         row = self._user_row_idx(user_idx)
+        if row < 0 or self.user_factors is None or self.item_factors is None:
+            pop = self.popular_items if self.popular_items else list(range(min(k, len(self.item_factors) if self.item_factors is not None else 0)))
+            out = [i for i in pop if i not in (exclude or set())][:k]
+            return out, [0.0] * len(out)
         return cf_mod.topk_cf(self.user_factors, self.item_factors, row, k=k, exclude=exclude)
 
     def sbert_topk(self, hist_rows: list[int] | None, k: int = 200):

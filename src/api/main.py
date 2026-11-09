@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import ARTIFACTS_DIR, RESULTS_DIR, NUM_USERS, NUM_ITEMS
+from ..serving.pipeline import RecommenderPipeline
 import numpy as np
 
 try:
@@ -184,15 +185,16 @@ def recommend(req: RecommendRequest):
     if req.user_idx is not None and (req.user_idx < 0 or req.user_idx >= NUM_USERS):
         raise HTTPException(status_code=400, detail="user_idx out of range")
 
-    t0 = time.perf_counter()
+    alpha = max(0.0, min(0.8, float(req.alpha)))
     cf_override = "bpr" if req.model == "bpr" else "als" if req.model == "als" else None
+    t0 = time.perf_counter()
     pl = get_pipeline(cf_override)
     items = pl.recommend(
         user_idx=uidx,
         user_history=req.history,
         k=req.k,
         model=req.model,
-        alpha=req.alpha,
+        alpha=alpha,
     )
     latency_ms = round((time.perf_counter() - t0) * 1000, 2)
     items_meta = [get_item_metadata(it) for it in items]
@@ -202,7 +204,7 @@ def recommend(req: RecommendRequest):
         "user_idx": uidx,
         "user_status": user_status,
         "model": req.model,
-        "alpha": req.alpha,
+        "alpha": alpha,
         "k": req.k,
         "latency_ms": latency_ms,
         "items": items,
@@ -400,7 +402,7 @@ def simulate(req: SimRequest):
         return np.where(rng_ < 1e-8, 0.0, (x - mn) / np.maximum(rng_, 1e-8))
 
     # late fusion (alpha)
-    alpha = float(req.alpha)
+    alpha = max(0.0, min(0.8, float(req.alpha)))
     late = alpha * minmax_rows(cf_als) + (1 - alpha) * minmax_rows(sb_scores)
 
     # deep heads

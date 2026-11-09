@@ -25,7 +25,7 @@ const BENCHMARK_METRICS = [
     mrr: 0.3998,
     timeSec: 1,
     status: 'Verified Test Metric',
-    best: true,
+    best: false,
   },
   {
     model: 'ALS (implicit factors=32)',
@@ -95,7 +95,7 @@ const BENCHMARK_METRICS = [
     mrr: 0.3120,
     timeSec: 1,
     status: 'Verified Test Metric',
-    best: false,
+    best: true,
   },
   {
     model: 'Deep Early Fusion (DCN)',
@@ -149,7 +149,7 @@ export default function App() {
     user_idx: 5,
     user_status: 'Prime VIP'
   });
-  const [model, setModel] = useState<string>('late_fusion');
+  const [model, setModel] = useState<string>('light_gated');
   const [topK, setTopK] = useState<number>(10);
   const [alpha, setAlpha] = useState<number>(0.65);
   const [userHistory, setUserHistory] = useState<number[]>([120, 450, 890]);
@@ -515,7 +515,7 @@ export default function App() {
                   <input
                     type="range"
                     min="0"
-                    max="1"
+                    max="0.8"
                     step="0.05"
                     value={alpha}
                     onChange={e => {
