@@ -242,7 +242,7 @@ log(f"Prepared {len(eval_instances):,} instances | RAM {mem_info()}")
 TEST_N = 5000
 test_inst = eval_instances[:TEST_N]
 val_inst = eval_instances[TEST_N:TEST_N + 2000]
-train_for_fit = eval_instances[TEST_N + 2000:TEST_N + 2000 + 200000]
+train_for_fit = eval_instances[TEST_N + 2000:TEST_N + 2000 + 100000]
 
 
 def eval_scorer(fn, instances):
