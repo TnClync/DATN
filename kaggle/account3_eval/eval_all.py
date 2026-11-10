@@ -173,8 +173,17 @@ print(f"Test positives mapped: {len(tu):,}")
 covered = ti < CATALOG
 users_cov = np.unique(tu[covered])
 elig_users = users_cov[counts[users_cov] >= MIN_INTERACTIONS]
+N_full = len(elig_users)
+print(f"Eligible test users (>= {MIN_INTERACTIONS} train, positive in {CATALOG:,}-item catalog): {N_full:,}")
+
+# Sample 20% of eligible users for evaluation (random, reproducible)
+EVAL_SAMPLE_FRAC = 0.20
+rng_sample = np.random.default_rng(12345)
+n_sample = int(round(N_full * EVAL_SAMPLE_FRAC))
+sample_idx = rng_sample.choice(N_full, size=n_sample, replace=False)
+elig_users = elig_users[sample_idx]
 N = len(elig_users)
-print(f"Eligible test users (>= {MIN_INTERACTIONS} train, positive in {CATALOG:,}-item catalog): {N:,}")
+print(f"Sampled {EVAL_SAMPLE_FRAC*100:.0f}% for eval: {N:,} users (seed=12345, without replacement)")
 
 # all test positives for eligible users (catalog + non-catalog, to ban properly)
 def ismember(values: np.ndarray, members: np.ndarray) -> np.ndarray:
@@ -642,7 +651,7 @@ print("Transformer:", res_transformer)
 
 # -------------------------------------------------------------------- summary
 summary = {
-    "protocol": "ALL eligible test users, 1 positive + 99 random negatives, shared 200k-item catalog, leak-free SBERT profiles",
+    "protocol": "Random 20% sample of eligible test users (seed=12345, without replacement), 1 positive + 99 random negatives, shared 200k-item catalog, leak-free SBERT profiles",
     "eval_catalog_items": CATALOG,
     "n_test_positive_rows": int(len(tu)),
     "n_eval_users": int(N),
