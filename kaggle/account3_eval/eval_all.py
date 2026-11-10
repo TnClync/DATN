@@ -294,6 +294,9 @@ def metrics_from_positions(pos: np.ndarray, valid: np.ndarray | None = None) -> 
         "HR@5": round(float(((posv < 5) & valid).mean()), 4),
         "HR@10": round(float(((posv < 10) & valid).mean()), 4),
         "HR@20": round(float(((posv < 20) & valid).mean()), 4),
+        "Recall@5": round(float(((posv < 5) & valid).mean()), 4),
+        "Recall@10": round(float(((posv < 10) & valid).mean()), 4),
+        "Recall@20": round(float(((posv < 20) & valid).mean()), 4),
         "NDCG@5": round(float(np.where((posv < 5) & valid, 1.0 / np.log2(posv + 2), 0.0).mean()), 4),
         "NDCG@10": round(float(np.where((posv < 10) & valid, 1.0 / np.log2(posv + 2), 0.0).mean()), 4),
         "NDCG@20": round(float(np.where((posv < 20) & valid, 1.0 / np.log2(posv + 2), 0.0).mean()), 4),
@@ -676,7 +679,7 @@ summary = {
 print("\n" + "=" * 76)
 print(f"FINAL COMPARISON (ALL TEST SET, N={N:,})")
 print("=" * 76)
-print(f"{'Model':<26} {'HR@5':>7} {'HR@10':>7} {'HR@20':>7} {'NDCG@10':>8} {'MRR':>7}")
+print(f"{'Model':<26} {'HR@5':>7} {'HR@10':>7} {'HR@20':>7} {'NDCG@10':>8} {'MRR':>7} {'Recall@10':>10}")
 rows = [
     ("ALS", res_als),
     ("BPR", res_bpr),
@@ -694,7 +697,7 @@ for name, m in rows:
         print(f"{name:<26} {'n/a':>7}")
         continue
     print(f"{name:<26} {m['HR@5']:>7.4f} {m['HR@10']:>7.4f} {m['HR@20']:>7.4f} "
-          f"{m['NDCG@10']:>8.4f} {m['MRR']:>7.4f}")
+          f"{m['NDCG@10']:>8.4f} {m['MRR']:>7.4f} {m['Recall@10']:>10.4f}")
 print("=" * 76)
 print(json.dumps(summary, indent=2))
 print("DONE in", round(time.time() - t0, 1), "s")
