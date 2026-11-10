@@ -198,7 +198,7 @@ eval_instances = build_instances(eval_users)
 log(f"Prepared {len(eval_instances):,} instances | RAM {mem_info()}")
 TEST_N = 5000
 test_inst = eval_instances[:TEST_N]
-train_for_fit = eval_instances[TEST_N:TEST_N + 80000]
+train_for_fit = eval_instances[TEST_N:TEST_N + 20000]
 
 
 # ---- Transformer Fusion ----
