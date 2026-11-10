@@ -5,15 +5,23 @@
   "language": "python",
   "kernel_type": "notebook",
   "is_private": "true",
-  "enable_gpu": "false",
+  "enable_gpu": "true",
   "enable_tpu": "false",
   "enable_internet": "true",
   "dataset_sources": [
     "nguynteo/lastone",
-    "nguynteo/lastreview"
+    "nguynteo/lastreview",
+    "nguynteo/item-profile"
   ],
   "competition_sources": [],
   "kernel_sources": [
-    "nguynteo/deep-hybrid-recommender-datn"
+    "nguynteo/cf-als-bpr-implicit-datn",
+    "nguynteo/train-lightgcn-datn",
+    "nguynteo/train-light-gated-datn",
+    "nguynteo/train-deep-early-datn",
+    "nguynteo/train-graph-light-gated-datn",
+    "nguynteo/train-two-tower-datn",
+    "nguynteo/train-transformer-datn",
+    "nguynteo/train-sbert-metadata-reviewer-datn"
   ]
 }

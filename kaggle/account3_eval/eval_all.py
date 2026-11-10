@@ -135,6 +135,11 @@ sbert_path = find_sbert_file()
 assert sbert_path is not None, "768-d sbert_item_embeddings_f16.npy not found - run the SBERT kernel first"
 gate_path = find_file("light_gated_fusion.pt")
 deep_path = find_file("deep_early_fusion.pt")
+graph_gate_path = find_file("graph_light_gated_fusion.pt")
+two_tower_path = find_file("two_tower_fusion.pt")
+transformer_path = find_file("transformer_fusion.pt")
+graph_uf = np.load(find_file("graph_user_factors_f16.npy"), mmap_mode="r")
+graph_itf = np.load(find_file("graph_item_factors_f16.npy")).astype(np.float32)
 u_ids = np.load(find_file("user_ids.npy"))
 i_ids = np.load(find_file("item_ids.npy"))
 n_users, n_items = len(u_ids), len(i_ids)
@@ -366,7 +371,8 @@ print("6. TWO-STAGE RETRIEVAL (all test users)")
 print("=" * 56)
 ts_res = None
 ts_best = None
-if HAS_FAISS:
+RUN_TWO_STAGE = os.environ.get("RUN_TWO_STAGE", "0") == "1"
+if HAS_FAISS and RUN_TWO_STAGE:
     # Both retrievers search the SAME shared 200k-item catalog used by every model.
     cf_index = faiss.IndexFlatIP(als_itf.shape[1])
     cf_index.add(als_itf[:CATALOG])
@@ -456,7 +462,8 @@ class LightGate(nn.Module):
     def __init__(self, in_features=32 + 32 + SBERT_DIM):
         super().__init__()
         self.gate_net = nn.Sequential(
-            nn.Linear(in_features, 64), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(in_features, 128), nn.ReLU(), nn.Dropout(0.1),
+            nn.Linear(128, 64), nn.ReLU(), nn.Dropout(0.1),
             nn.Linear(64, 1), nn.Sigmoid())
 
     def forward(self, u_cf, i_cf, i_sbert, cf_score, sbert_score):
@@ -466,12 +473,13 @@ class LightGate(nn.Module):
 
 
 class DeepEarlyFusion(nn.Module):
-    def __init__(self, in_dim, cross_layers=3, hidden=128):
+    def __init__(self, in_dim, cross_layers=4, hidden=256):
         super().__init__()
         self.cross = nn.ModuleList([nn.Linear(in_dim, in_dim) for _ in range(cross_layers)])
         self.deep = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(),
                                   nn.Linear(hidden, hidden), nn.ReLU(),
-                                  nn.Linear(hidden, 1))
+                                  nn.Linear(hidden, hidden // 2), nn.ReLU(),
+                                  nn.Linear(hidden // 2, 1))
 
     def forward(self, x):
         x0, xi = x, x
@@ -480,12 +488,59 @@ class DeepEarlyFusion(nn.Module):
         return (xi.mean(dim=-1, keepdim=True) + self.deep(x)).squeeze(-1)
 
 
+class UserTower(nn.Module):
+    def __init__(self, in_dim=32, hidden=128, out_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(0.1),
+                                 nn.Linear(hidden, out_dim))
+    def forward(self, x):
+        return self.net(x)
+
+
+class ItemTower(nn.Module):
+    def __init__(self, in_dim=32 + SBERT_DIM, hidden=256, out_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Dropout(0.1),
+                                 nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(0.1),
+                                 nn.Linear(hidden, out_dim))
+    def forward(self, x):
+        return self.net(x)
+
+
+class TransformerFusion(nn.Module):
+    def __init__(self, in_dim=32 + 32 + SBERT_DIM, d_model=128, nhead=4, nlayers=2):
+        super().__init__()
+        self.proj = nn.Linear(in_dim, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
+                                                  dim_feedforward=d_model * 4, dropout=0.1,
+                                                  batch_first=True, activation="gelu")
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
+        self.head = nn.Linear(d_model, 1)
+    def forward(self, x):
+        h = self.proj(x)
+        h = self.encoder(h)
+        return self.head(h).squeeze(-1)
+
+
 gate_model = LightGate()
 gate_model.load_state_dict(torch.load(gate_path, map_location="cpu"))
 gate_model.eval()
 deep_model = DeepEarlyFusion(32 + 32 + SBERT_DIM)
 deep_model.load_state_dict(torch.load(deep_path, map_location="cpu"))
 deep_model.eval()
+graph_gate_model = LightGate()
+graph_gate_model.load_state_dict(torch.load(graph_gate_path, map_location="cpu"))
+graph_gate_model.eval()
+user_tower = UserTower()
+item_tower = ItemTower()
+tt_state = torch.load(two_tower_path, map_location="cpu")
+user_tower.load_state_dict(tt_state["user"])
+item_tower.load_state_dict(tt_state["item"])
+user_tower.eval()
+item_tower.eval()
+transformer_model = TransformerFusion()
+transformer_model.load_state_dict(torch.load(transformer_path, map_location="cpu"))
+transformer_model.eval()
 
 
 def eval_deep_head(kind: str) -> dict[str, float]:
@@ -514,6 +569,62 @@ def eval_deep_head(kind: str) -> dict[str, float]:
     return metrics_from_positions(pos_all)
 
 
+def eval_graph_gate() -> dict[str, float]:
+    pos_all = np.empty(N, dtype=np.int32)
+    for start in range(0, N, DEEP_BATCH):
+        idx = np.arange(start, min(start + DEEP_BATCH, N))
+        b = len(idx)
+        c = cands[idx]
+        u_cf = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)
+        i_cf = np.asarray(graph_itf[c], dtype=np.float32)
+        i_sb = sbert_cat[c]
+        cf = np.einsum("bnd,bd->bn", i_cf, u_cf, optimize=True)
+        sb = np.einsum("bnd,bd->bn", i_sb, user_sbert[idx], optimize=True)
+        with torch.no_grad():
+            fused, _ = graph_gate_model(
+                torch.from_numpy(np.repeat(u_cf[:, None, :], 100, axis=1)),
+                torch.from_numpy(i_cf), torch.from_numpy(i_sb),
+                torch.from_numpy(cf), torch.from_numpy(sb))
+            s = fused.numpy()
+        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+    return metrics_from_positions(pos_all)
+
+
+def eval_two_tower() -> dict[str, float]:
+    pos_all = np.empty(N, dtype=np.int32)
+    for start in range(0, N, DEEP_BATCH):
+        idx = np.arange(start, min(start + DEEP_BATCH, N))
+        b = len(idx)
+        c = cands[idx]
+        u_in = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)  # (b, 32)
+        i_in = np.concatenate([np.asarray(graph_itf[c], dtype=np.float32),
+                               sbert_cat[c]], axis=2)  # (b, 100, 32+768)
+        with torch.no_grad():
+            u_emb = user_tower(torch.from_numpy(u_in)).numpy()  # (b, 64)
+            i_emb = item_tower(torch.from_numpy(i_in.reshape(b * 100, -1))).numpy().reshape(b, 100, -1)
+            s = np.einsum("bd,bnd->bn", u_emb, i_emb, optimize=True)
+        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+    return metrics_from_positions(pos_all)
+
+
+def eval_transformer() -> dict[str, float]:
+    pos_all = np.empty(N, dtype=np.int32)
+    BATCH_U = 16
+    for start in range(0, N, BATCH_U):
+        idx = np.arange(start, min(start + BATCH_U, N))
+        b = len(idx)
+        c = cands[idx]
+        u_cf = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)  # (b, 32)
+        i_cf = np.asarray(graph_itf[c], dtype=np.float32)  # (b, 100, 32)
+        i_sb = sbert_cat[c]  # (b, 100, 768)
+        feats = np.concatenate([
+            np.repeat(u_cf[:, None, :], 100, axis=1), i_cf, i_sb], axis=2).astype(np.float32)  # (b, 100, 832)
+        with torch.no_grad():
+            s = transformer_model(torch.from_numpy(feats)).numpy()  # (b, 100)
+        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+    return metrics_from_positions(pos_all)
+
+
 print("\n" + "=" * 56)
 print("7. DEEP HYBRID HEADS (all test users)")
 print("=" * 56)
@@ -521,6 +632,12 @@ res_gate = eval_deep_head("gate")
 print("Light Gated:", res_gate)
 res_deep = eval_deep_head("deep")
 print("Deep Early :", res_deep)
+res_graph_gate = eval_graph_gate()
+print("Graph Light Gated:", res_graph_gate)
+res_two_tower = eval_two_tower()
+print("Two-Tower:", res_two_tower)
+res_transformer = eval_transformer()
+print("Transformer:", res_transformer)
 
 
 # -------------------------------------------------------------------- summary
@@ -540,6 +657,9 @@ summary = {
                   if ts_res is not None else None),
     "light_gated": res_gate,
     "deep_early_fusion": res_deep,
+    "graph_light_gated": res_graph_gate,
+    "two_tower": res_two_tower,
+    "transformer": res_transformer,
     "eval_time_sec": round(time.time() - t0, 1),
 }
 (OUT_DIR / "eval_summary.json").write_text(json.dumps(summary, indent=2))
@@ -556,6 +676,9 @@ rows = [
     ((f"Two-Stage (a={ts_best})", ts_res) if ts_res else ("Two-Stage", None)),
     ("Light Gated Fusion", res_gate),
     ("Deep Early Fusion", res_deep),
+    ("Graph Light Gated", res_graph_gate),
+    ("Two-Tower", res_two_tower),
+    ("Transformer Fusion", res_transformer),
 ]
 for name, m in rows:
     if m is None:
