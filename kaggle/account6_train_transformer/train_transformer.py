@@ -193,12 +193,12 @@ def build_instances(eval_users):
 
 test_users = np.array([u for u in user_gt.keys() if user_inter_count[u] >= MIN_INTERACTIONS])
 test_users = np.array([u for u in test_users if any(it < SBERT_COVERAGE for it in user_gt[u])])
-eval_users = np.random.default_rng(42).choice(test_users, size=min(50000, len(test_users)), replace=False)
+eval_users = np.random.default_rng(42).choice(test_users, size=min(200000, len(test_users)), replace=False)
 eval_instances = build_instances(eval_users)
 log(f"Prepared {len(eval_instances):,} instances | RAM {mem_info()}")
 TEST_N = 5000
 test_inst = eval_instances[:TEST_N]
-train_for_fit = eval_instances[TEST_N:TEST_N + 20000]
+train_for_fit = eval_instances[TEST_N:TEST_N + 80000]
 
 
 # ---- Transformer Fusion ----
