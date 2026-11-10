@@ -233,6 +233,7 @@ def build_instances(eval_users):
 
 
 CAND_POOL = np.arange(SBERT_COVERAGE)
+user_inter_count = np.bincount(u_inv, minlength=len(u_uniq))
 test_users = np.array([u for u in user_gt.keys() if user_inter_count[u] >= MIN_INTERACTIONS])
 test_users = np.array([u for u in test_users if any(it < SBERT_COVERAGE for it in user_gt[u])])
 eval_users = np.random.default_rng(42).choice(test_users, size=min(50000, len(test_users)), replace=False)
