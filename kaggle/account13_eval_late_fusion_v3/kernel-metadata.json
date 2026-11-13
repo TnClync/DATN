@@ -1,0 +1,19 @@
+{
+  "id": "minhteonguyn/eval-late-fusion-v3-datn",
+  "title": "Eval late_fusion_v3 DATN",
+  "code_file": "eval_late_fusion_v3.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "minhteonguyn/train-sbert-v2-datn",
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
+}

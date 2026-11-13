@@ -1,0 +1,18 @@
+{
+  "id": "minhteonguyn/eval-bpr-datn",
+  "title": "Eval bpr DATN",
+  "code_file": "eval_bpr.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
+}

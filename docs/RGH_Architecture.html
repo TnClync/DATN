@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RGH — CF-Anchored Residual Gated Hybrid</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #151a22;
+    --panel2: #1b2230;
+    --line: #2a3344;
+    --text: #e8ecf4;
+    --muted: #9aa6ba;
+    --blue: #5b9dff;
+    --green: #3ecf8e;
+    --purple: #a78bfa;
+    --orange: #f5a524;
+    --red: #ff7a7a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 24px 60px;
+    background: #0b0d12;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", sans-serif, "Noto Sans TC";
+    line-height: 1.45;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  h1 .tag { color: var(--blue); }
+  .sub { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: linear-gradient(180deg, var(--panel) 0%, #121722 100%);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px 16px 18px;
+  }
+  .panel h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--muted); margin: 0 0 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dot { width:10px;height:10px;border-radius:50%;background:var(--blue);display:inline-block; }
+
+  .flow { display:flex; gap: 10px; flex-wrap:wrap; align-items:stretch; }
+  .box {
+    border:1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+    background: var(--panel2); min-width: 150px; flex:1;
+  }
+  .box .t { font-weight: 700; font-size: 13px; margin-bottom: 6px; display:flex;align-items:center;gap:6px; }
+  .box .d { font-size: 12px; color: var(--muted); }
+  .box .n { font-size: 11px; color:#7fdcff; margin-top:6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .box.cf { border-color:#274060; } .box.cf .t { color: #8ec2ff; }
+  .box.content { border-color:#2b4a33; } .box.content .t { color: var(--green); }
+  .box.pop { border-color:#4a3a22; } .box.pop .t { color: var(--orange); }
+  .box.union { border-color:#3a3355; background:#181c2a; text-align:center; }
+  .box.union .t { color: var(--purple); justify-content:center; }
+
+  .formula {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; background: #0f1420; border:1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; color: #cfe3ff; overflow-x:auto;
+    white-space: pre; line-height: 1.6;
+  }
+  .small { font-size: 12px; color: var(--muted); }
+  code { color:#9be3a8; background:#141a24; padding:1px 6px; border-radius:6px; font-size:12px; }
+  table { width:100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border-bottom:1px solid var(--line); padding: 6px 8px; text-align:left; }
+  th { color: var(--muted); font-weight:600; }
+  tr:last-child td { border-bottom: none; }
+  .ok { color: var(--green); font-weight:700; }
+  .warn { color: var(--orange); font-weight:700; }
+  .bad { color: var(--red); font-weight:700; }
+
+  .arrow { text-align:center; color: var(--muted); font-size: 22px; margin: 10px 0; }
+  .cols { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr 1fr; } }
+  .hr { height:1px; background: var(--line); margin: 12px 0; }
+  .footer { color: var(--muted); font-size: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>RGH — <span class="tag">CF-Anchored Residual Gated Hybrid</span></h1>
+  <p class="sub">Kiến trúc deep hybrid đề xuất cho bài toán khuyến nghị Amazon Books / Electronics (implicit feedback, <code>rating ≥ 4</code>, <code>min ≥ 3</code> tương tác, cùng artifact với ALS/BPR/LightGCN/SBERT).</p>
+
+  <!-- OVERALL FLOW -->
+  <div class="panel" style="margin-bottom:18px;">
+    <h2><span class="dot"></span>Tổng quan 2 tầng</h2>
+    <div class="flow">
+      <div class="box cf">
+        <div class="t">① Candidate Retrieval</div>
+        <div class="d">Union của 4 nguồn:<br><b>ALS</b> (top 60) + <b>LightGCN</b> (top 60)<br>+ <b>BLaIR / SBERT</b> (top 60, metadata-only)<br>+ <b>Popularity</b> (top 15)</div>
+        <div class="n">→ U ≈ 120–250 candidates / user</div>
+      </div>
+      <div class="box content">
+        <div class="t">② Feature Builder</div>
+        <div class="d">Per-user z-score trên U:<br><code>z_cf</code> · <code>z_gcn</code> · <code>z_txt</code><br>+ popularity, history_len, domain</div>
+        <div class="n">Chuẩn hoá cùng thang đo trước fusion</div>
+      </div>
+      <div class="box union">
+        <div class="t">③ Residual Reranker</div>
+        <div class="d">score = wide + gate · Δ<br>Δ = DCN-V2 cross + Deep MLP<br>Gate b khởi tạo &lt; 0 → an toàn cho CF</div>
+        <div class="n">→ Listwise / hard-negative training</div>
+      </div>
+    </div>
+    <div class="arrow">↓</div>
+    <div class="formula">score(u, i) = a_cf·z_cf + a_gcn·z_gcn + a_txt·z_txt + σ(w·h + b₀) · [cross_layers(x) + deep(x)]</div>
+    <p class="small" style="margin-top:10px;"><b>Safety guarantee:</b> nếu g → 0 thì score quy về tổng trọng số nhánh đã normalised — mô hình <u>không phá hỏng ordering CF</u>; nếu content/graph không ích, gate học được gate ≈ 0.</p>
+  </div>
+
+  <div class="grid2" style="margin-bottom:18px;">
+
+    <!-- STAGE 1 -->
+    <div class="panel">
+      <h2><span class="dot" style="background:var(--blue)"></span>Stage 1 — Candidate Generation</h2>
+      <table>
+        <thead><tr><th>Nguồn</th><th>Tín hiệu</th><th>Ghi chú</th></tr></thead>
+        <tbody>
+          <tr><td><b>ALS</b></td><td>User×Item latent (implicit)</td><td>float16 factors, mmap 8GB RAM</td></tr>
+          <tr><td><b>LightGCN</b></td><td>Graph diffusion</td><td>GRAPH_DIM 32–64, 2–3 layers</td></tr>
+          <tr><td><b>BLaIR / SBERT</b></td><td>Item text embedding</td><td>Metadata-only preferred (no leak)</td></tr>
+          <tr><td><b>Popularity</b></td><td>log1p(item_count)</td><td>Safety net / cold coverage</td></tr>
+        </tbody>
+      </table>
+      <div class="hr"></div>
+      <div class="formula">U = Top60_ALS ∪ Top60_GCN ∪ Top60_TXT ∪ Top15_POP
+Train: U_train ⊇ {positive}  (anchor)
+Serving: U via ANN (FAISS/Graph top-k, k ≤ 60)</div>
+      <p class="small" style="margin-top:8px;"><b>Metrics cần báo cáo:</b> <code>Retrieval Recall@120(U)</code>, coverage, % positive bên ngoài catalog. Đây là trần trên Stage 2.</p>
+    </div>
+
+    <!-- STAGE 2 -->
+    <div class="panel">
+      <h2><span class="dot" style="background:var(--green)"></span>Stage 2 — Residual Reranker</h2>
+      <div class="cols">
+        <div class="box"><div class="t" style="color:#8ec2ff">Wide</div><div class="d">a_cf·z_cf<br>a_gcn·z_gcn<br>a_txt·z_txt</div></div>
+        <div class="box"><div class="t" style="color:#f5a524">DCN-V2 Cross</div><div class="d">3 cross layers<br>x ← x₀⊙(Wx+b)+x</div></div>
+        <div class="box"><div class="t" style="color:#a78bfa">Deep MLP</div><div class="d">256 → 128 → 1<br>Dropout 0.2</div></div>
+        <div class="box"><div class="t" style="color:#3ecf8e">Gate</div><div class="d">σ(w·h+b₀), b₀ = −2.0<br>→ g(0) ≈ 0.119</div></div>
+      </div>
+      <div class="hr"></div>
+      <div class="formula">Δ = cross_summary(x) + deep(x)       ← residual correction
+ score = wide + gate · Δ              ← final</div>
+      <p class="small" style="margin-top:8px;">Feature crosses học tương tác <code>CF × content</code> (ví dụ: CF cao override content). Gate xử lý sự khác biệt <b>per (user, item)</b> — điều chỉnh linh hoạt giữa warm / cold item.</p>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-bottom:18px;">
+
+    <!-- USER INPUT -->
+    <div class="panel">
+      <h2><span class="dot" style="background:var(--purple)"></span>User Input (CF + CB)</h2>
+      <table>
+        <thead><tr><th>Tầng</th><th>Input</th><th>Vai trò</th></tr></thead>
+        <tbody>
+          <tr><td><b>CF</b></td><td>u_als · u_bpr · u_gcn</td><td>Hành vi ngươli dùng</td></tr>
+          <tr><td><b>CB</b></td><td>u_txt = mean(embed train history)</td><td>Content người dùng thích</td></tr>
+          <tr><td><b>Candidate</b></td><td>z_cf · z_gcn · z_txt</td><td>Normalized fusion inputs</td></tr>
+          <tr><td><b>Context</b></td><td>popularity · rank-in-branch · hist_len · domain</td><td>Điều phối gate</td></tr>
+        </tbody>
+      </table>
+      <p class="small" style="margin-top:8px;">Cold-start thật sự (email/segment) ngoài phạm vi dataset; user mới không có history → CB mask = 0 → score về CF + popularity.</p>
+    </div>
+
+    <!-- TRAINING -->
+    <div class="panel">
+      <h2><span class="dot" style="background:var(--orange)"></span>Training</h2>
+      <div class="formula">L_rank = −log exp(s_pos/T) / Σ_{j∈U} exp(s_j/T)
+ L_pair = −log σ(s_pos − s_neg_hard)         (λ_pair ≈ 0.1)
+ L = L_rank + λ_pair · L_pair</div>
+      <ul style="margin:8px 0 0; padding-left:18px; font-size:12px; color:var(--muted);">
+        <li>Negative = <b>hard negatives</b> từ retrieval (top non-positive) + random (ratio 1/10)</li>
+        <li>Optimizer: AdamW, lr 1e-3→1e-4, weight_decay 1e-4, grad clip 1.0</li>
+        <li>Early stop theo <b>NDCG@10(validation)</b> — test chỉ dùng 1 lần</li>
+        <li>Warmup 1 epoch; tối đa 10–20 epochs; checkpoint = top-1 validation</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- EVALUATION -->
+  <div class="panel" style="margin-bottom:10px;">
+    <h2><span class="dot" style="background:#ff7a7a"></span>Protocol đánh giá</h2>
+    <div class="grid2">
+      <div>
+        <b style="font-size:12px; color:var(--muted);">Retrieval</b>
+        <ul style="font-size:12px; padding-left:18px; margin:4px 0;">
+          <li>Retrieval Recall@120(U)</li>
+          <li>Coverage / novelty / popularity decile</li>
+          <li>Items ngoài catalog (cold): ~6.13% cần ghi rõ</li>
+        </ul>
+      </div>
+      <div>
+        <b style="font-size:12px; color:var(--muted);">Ranking</b>
+        <ul style="font-size:12px; padding-left:18px; margin:4px 0;">
+          <li>HR@5/10/20 · NDCG@5/10/20 · MRR · Precision · Recall · AP</li>
+          <li>Bootstrap 95% CI theo user (paired)</li>
+          <li>Tách warm/cold item; tách domain Books / Electronics</li>
+        </ul>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <b style="font-size:12px; color:var(--muted);">Acceptance checklist</b>
+    <ol style="font-size:12px; padding-left:18px; margin:6px 0 0;">
+      <li><code>a_gcn = a_txt = gate = 0</code> ⇒ ≈ ALS (sanity check)</li>
+      <li>+ normalized branch scores ⇒ cải thiện</li>
+      <li>+ listwise loss ⇒ cải thiện tiếp</li>
+      <li>+ content (metadata-only) ⇒ mục tiêu vượt ALS → ensemble</li>
+      <li>+ graph branch ⇒ tối ưu cuối</li>
+    </ol>
+  </div>
+
+  <div class="footer">
+    <b>Baseline hiện tại (cần beat):</b> ALS 0.6845 HR@10 / 0.4882 NDCG@10 · BPR 0.6539 / 0.4517 · Deep Early Fusion 0.5700 / 0.3603 · Light Gated 0.5284 / 0.3037 · <b>Ensemble ALS+BPR 0.7242 / 0.5603</b>. RGH phải ≥ ALS; mục tiêu ≥ Ensemble.
+  </div>
+
+</div>
+</body>
+</html>

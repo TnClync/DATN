@@ -1,0 +1,20 @@
+{
+  "id": "minhteonguyn/train-rgh-v2-datn",
+  "title": "Train RGH v2 DATN",
+  "code_file": "train_rgh_v2.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "minhteonguyn/datn-graph-factors"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "minhteonguyn/train-cf-als-bpr-implicit",
+    "minhteonguyn/train-sbert-v2-datn"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "minhteonguyn/train-late-fusion-v3-datn",
+  "title": "Train late fusion v3 DATN",
+  "code_file": "train_late_fusion_v3.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "minhteonguyn/train-sbert-v2-datn",
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
+}

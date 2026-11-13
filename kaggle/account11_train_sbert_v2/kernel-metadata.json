@@ -1,0 +1,18 @@
+{
+  "id": "minhteonguyn/train-sbert-v2-datn",
+  "title": "Train sbert v2 DATN",
+  "code_file": "train_sbert_v2.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview",
+    "nguynteo/finaldata"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

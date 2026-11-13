@@ -1,0 +1,19 @@
+{
+  "id": "minhteonguyn/eval-sbert-datn",
+  "title": "Eval sbert DATN",
+  "code_file": "eval_sbert.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "minhteonguyn/train-sbert-v2-datn",
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
+}
