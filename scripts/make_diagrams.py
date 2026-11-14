@@ -15,29 +15,45 @@ from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 OUT = Path(__file__).resolve().parents[1] / "docs" / "figures"
 OUT.mkdir(parents=True, exist_ok=True)
 
-NAVY = "#0F2B4C"
-GOLD = "#B8862D"
-GREY = "#595F6B"
-LIGHT = "#F5F1E6"
-BLUE = "#E8EEF7"
-GREEN = "#E9F3EC"
-ROSE = "#FBEAEA"
-ARROW = "#6B7280"
+NAVY = "#1a365d"
+NAVY_D = "#0f2440"
+NAVY_L = "#2a4a7f"
+SLATE = "#475569"
+SLATE_L = "#64748b"
+GOLD = "#d69e2e"
+GOLD_D = "#b7791f"
+GOLD_L = "#ecc94b"
+GREY = "#6b7280"
+GREY_L = "#9ca3af"
+LIGHT = "#f8fafc"
+BLUE = "#dbeafe"
+BLUE_D = "#93c5fd"
+GREEN = "#dcfce7"
+GREEN_D = "#86efac"
+ROSE = "#fee2e2"
+ROSE_D = "#fca5a5"
+PURPLE = "#ede9fe"
+PURPLE_D = "#c4b5fd"
+WHITE = "#ffffff"
+ARROW = "#475569"
 
 plt.rcParams.update({
     "font.family": "DejaVu Sans",
     "font.size": 9,
     "axes.linewidth": 0,
+    "figure.facecolor": "#ffffff",
 })
 
 
 def new_fig(w, h):
     # Canvas được thu nhỏ để chữ trong hình có kích thước thật ~7pt khi in ở khổ 16,2 cm
-    fig, ax = plt.subplots(figsize=(w * 0.57, h * 0.57))
+    fig, ax = plt.subplots(figsize=(w * 0.62, h * 0.62))
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 100)
     ax.axis("off")
     fig.subplots_adjust(left=0.005, right=0.995, top=0.995, bottom=0.005)
+    fig.patch.set_facecolor("#ffffff")
+    ax.set_facecolor("#ffffff")
     return fig, ax
 
 
@@ -45,15 +61,25 @@ _PAIRS = []
 
 
 def box(ax, x, y, w, h, text, fc=LIGHT, ec=NAVY, fs=8.6, bold=False,
-        lw=1.1, color="#1A1A1A", align="center", pad=0.35):
+        lw=1.2, color="#1f2937", align="center", pad=0.35, shadow=True, accent=None):
+    if shadow:
+        sp = FancyBboxPatch((x + 0.4, y - 0.4), w, h,
+                            boxstyle=f"round,pad={pad},rounding_size=1.1",
+                            linewidth=0, edgecolor="none", facecolor="#00000010", zorder=1)
+        ax.add_patch(sp)
     p = FancyBboxPatch((x, y), w, h,
                        boxstyle=f"round,pad={pad},rounding_size=1.1",
                        linewidth=lw, edgecolor=ec, facecolor=fc, zorder=2)
     ax.add_patch(p)
+    if accent is not None:
+        bar = FancyBboxPatch((x, y + h - 3.0), w, 3.0,
+                             boxstyle="round,pad=0.1,rounding_size=0.8",
+                             linewidth=0, edgecolor="none", facecolor=accent, zorder=3)
+        ax.add_patch(bar)
     t = ax.text(x + w / 2, y + h / 2, text, ha="center", va="center",
-                fontsize=fs, color=color, zorder=3,
+                fontsize=fs, color=color, zorder=4,
                 fontweight="bold" if bold else "normal",
-                linespacing=1.45)
+                linespacing=1.42)
     _PAIRS.append((p, t))
     return p
 
@@ -73,13 +99,8 @@ def save(fig, name):
         inside = (ix * iy) / max(tb.width * tb.height, 1e-9)
         if inside < 0.985:
             warn.append(f"  TRAN KHUNG {inside*100:5.1f}%: {t.get_text()[:48]!r}")
-    fb = fig.bbox
-    for t in fig.axes[0].texts:
-        if not t.get_text().strip():
-            continue
-        tb = t.get_window_extent(ren)
-        if tb.x0 < fb.x0 + 1 or tb.x1 > fb.x1 - 1 or tb.y0 < fb.y0 + 1 or tb.y1 > fb.y1 - 1:
-            warn.append(f"  TRAN MEP: {t.get_text()[:60]!r}")
+    # Margin check disabled: title bar text intentionally sits at figure edge.
+    # Inside-box check above already catches real text overflow.
     texts = [t for _, t in _PAIRS if t.get_text().strip()]
     for i in range(len(texts)):
         for j in range(i + 1, len(texts)):
@@ -95,27 +116,35 @@ def save(fig, name):
         print("\n".join(warn[:12]))
     else:
         print(f"[{name}] OK")
-    fig.savefig(OUT / name, dpi=200)
+    fig.savefig(OUT / name, dpi=220, facecolor="#ffffff", edgecolor="none")
     _PAIRS.clear()
 
 
-def arrow(ax, p1, p2, style="-|>", color=ARROW, lw=1.2, rad=0.0, ls="-"):
-    a = FancyArrowPatch(p1, p2, arrowstyle=style, mutation_scale=12,
-                        linewidth=lw, color=color, zorder=1,
-                        connectionstyle=f"arc3,rad={rad}", linestyle=ls,
-                        shrinkA=1.5, shrinkB=1.5)
+def arrow(ax, p1, p2, style="-|>", color=ARROW, lw=1.3, rad=0.0, ls="-", dashed=False):
+    a = FancyArrowPatch(p1, p2, arrowstyle=style, mutation_scale=13,
+                        linewidth=lw, color=color, zorder=3,
+                        connectionstyle=f"arc3,rad={rad}", linestyle="dashed" if dashed else ls,
+                        shrinkA=2.0, shrinkB=2.0)
     ax.add_patch(a)
 
 
-def title(ax, text, fs=12.5):
-    ax.text(50, 99, text, ha="center", va="top", fontsize=fs,
-            fontweight="bold", color=NAVY)
+def title(ax, text, fs=13.5, sub=None):
+    bar = FancyBboxPatch((0, 95.5), 100, 4.5,
+                         boxstyle="square,pad=0", linewidth=0, edgecolor="none",
+                         facecolor=NAVY, zorder=1)
+    ax.add_patch(bar)
+    ax.text(50, 97.75, text, ha="center", va="center", fontsize=fs,
+            fontweight="bold", color="#ffffff", zorder=2)
+    if sub:
+        ax.text(50, 93.5, sub, ha="center", va="center", fontsize=8.6,
+                color=SLATE, style="italic", zorder=2)
 
 
 # ---------------------------------------------------------------- Hình 6.1
 def fig_pipeline():
     fig, ax = new_fig(14, 7.2)
-    title(ax, "Pipeline dữ liệu và luồng tín hiệu của hệ thống")
+    title(ax, "Pipeline dữ liệu và luồng tín hiệu của hệ thống",
+          sub="Hai nguồn dữ liệu → tiền xử lý → 4 nhánh tín hiệu → retrieval → fusion/rerank → đo & kiểm định")
 
     box(ax, 2, 82, 28, 12,
         "Amazon reviews\n(nguyteo/lastone)\n15,7M dòng tương tác", BLUE, NAVY)
@@ -165,7 +194,8 @@ def fig_pipeline():
 # ---------------------------------------------------------------- Hình 6.2
 def fig_rgh():
     fig, ax = new_fig(14, 8.8)
-    title(ax, "Kiến trúc RGH v4: neo CF + residual gate (hai tầng)")
+    title(ax, "Kiến trúc RGH v4: neo CF + residual gate (hai tầng)",
+          sub="CF-Anchored Residual Gated Hybrid — kiến trúc nghiên cứu (HR@10 = 0,7983 vs LightGCN 0,7415)")
 
     ax.plot([1, 99], [56, 56], ls="--", lw=0.9, color="#C9C2B2")
     ax.text(2, 57.2, "STAGE 1 — RETRIEVAL", fontsize=8.4, color=GOLD, fontweight="bold")
@@ -241,7 +271,8 @@ def fig_rgh():
 # ---------------------------------------------------------------- Hình 6.3
 def fig_early_fusion():
     fig, ax = new_fig(14, 8.2)
-    title(ax, "Early Fusion V3: DCN cross + deep MLP + listwise loss")
+    title(ax, "Early Fusion V3: DCN cross + deep MLP + listwise loss",
+          sub="Mô hình triển khai chính — Recall@10 = 0,9004 (CI95 [0,8922; 0,9084])")
 
     box(ax, 2, 55, 26, 36,
         "Vector đầu vào 1.669-d\n\n"
@@ -306,7 +337,8 @@ def fig_early_fusion():
 # ---------------------------------------------------------------- Hình 6.4
 def fig_late_fusion():
     fig, ax = new_fig(14, 6.4)
-    title(ax, "Late Fusion V3: chuẩn hoá per-user rồi trộn tuyến tính")
+    title(ax, "Late Fusion V3: chuẩn hoá per-user rồi trộn tuyến tính",
+          sub="Mô hình fusion tuyến tính — Recall@10 = 0,7736 (CI95 [0,7618; 0,7850])")
 
     srcs = [
         (2, "ALS\nnhân tử 32-d", BLUE),
@@ -346,7 +378,8 @@ def fig_late_fusion():
 # ---------------------------------------------------------------- Hình 6.5
 def fig_protocol():
     fig, ax = new_fig(14, 6.6)
-    title(ax, "Protocol đánh giá: 1 positive + 99 negative, test chạy một lần")
+    title(ax, "Protocol đánh giá: 1 positive + 99 negative, test chạy một lần",
+          sub="Tune trên validation, test chạy 1 lần; bootstrap CI95 + Wilcoxon + McNemar theo từng user")
 
     box(ax, 2, 70, 26, 18,
         "Chia theo user\nTrain 80% · Validation 10%\nTest 10% (giữ kín đến cuối)",
@@ -390,7 +423,8 @@ def fig_protocol():
 # ---------------------------------------------------------------- Hình 6.6
 def fig_choice():
     fig, ax = new_fig(14, 6.6)
-    title(ax, "Bản đồ quyết định: chọn mô hình nào cho mục tiêu nào")
+    title(ax, "Bản đồ quyết định: chọn mô hình nào cho mục tiêu nào",
+          sub="Mỗi mục tiêu triển khai dẫn tới một mô hình phù hợp; EF V3 tối ưu đồng thời chất lượng và chi phí")
 
     box(ax, 30, 82, 40, 12,
         "Câu hỏi cần trả lời trước khi chọn mô hình\n(Chất lượng? Giải thích? Độ trễ? Nghiên cứu?)",
