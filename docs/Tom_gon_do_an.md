@@ -11,6 +11,9 @@
 - **Metadata rebuild v4:** 3.686.940 item; product_text 99,97%, title 99,95%, brand 97,09%, category 89,5%, description 82,08% (chỉ 1.176 item thiếu toàn bộ metadata).
 - **SBERT v2:** 768-dim, 2.464.371 item × 768, leak-free (metadata-only).
 
+![Pipeline](figures/fig_6_1_pipeline.png)
+*Hình 1 — Pipeline dữ liệu và luồng tín hiệu: 4 nhánh → retrieval → fusion → đo & kiểm định.*
+
 ## 2. Cơ sở lý thuyết (bài báo nền)
 
 | Lĩnh vực | Bài báo | Vai trò trong đồ án |
@@ -41,10 +44,22 @@
 | SBERT | `u_txt · i_txt` (768-d) | Phủ 99,97% item, xử lý item mới |
 
 ### Kiến trúc đề xuất
+![RGH v4](figures/fig_6_2_rgh.png)
+*Hình 2 — Kiến trúc RGH v4: neo CF + gate + residual (hai tầng).*
+
+![Early Fusion V3](figures/fig_6_4_early_fusion.png)
+*Hình 3 — Early Fusion V3: vector 1.669-d → DCN cross 3 lớp + MLP → listwise softmax.*
+
+![Late Fusion V3](figures/fig_6_3_late_fusion.png)
+*Hình 4 — Late Fusion V3: z-score per-user, trộn 0,35/0,35/0,30.*
+
 - **Late Fusion V3 (tuyến tính):** `score = 0,35·z_cf + 0,35·z_bpr + 0,30·z_txt` (trọng số tune trên validation).
 - **Early Fusion V3 (triển khai chính):** vector 1.669-d (embeddings L2-norm + z-scores + pop/hist) → DCN cross 3 lớp + MLP 512→256→128→1 → `deep + mean(cross)` → listwise sampled softmax (1 pos + 40 neg).
 - **RGH v4 (nghiên cứu):** `score = a_cf·z_cf + a_gcn·z_gcn + a_txt·z_txt + g(h_u,h_i)·Δ` — neo CF + gate per-(user,item) (bias −2,5) + residual DCN/MLP; listwise loss.
 - **LambdaRank Two-Stage** (LightGBM) và **Stacked Ensemble** — phương án thay thế low-latency.
+
+![Protocol](figures/fig_7_1_protocol.png)
+*Hình 6 — Protocol: 1 positive + 99 negative, tune val/test 1 lần, bootstrap + paired test.*
 
 ## 4. Protocol đánh giá
 - **Protocol A:** 1 positive + 99 random negatives, cùng user, cùng candidate, cùng seed; leak-free history.
@@ -108,6 +123,9 @@
 | LambdaRank | Low-latency | <5 ms/item, retrain nhanh, CPU | Không học end-to-end; phải bảo trì feature store |
 | Stacked | Kiểm tra meta-learning | OOF predictions của 4 mô hình | Đắt gấp 4×, lợi ích <0,5 điểm |
 | Transformer/Deep Hybrid (N=2000) | Tham khảo | — | Protocol khác, không tái lập |
+
+![Bản đồ chọn mô hình](figures/fig_6_5_chon_mo_hinh.png)
+*Hình 5 — Bản đồ quyết định: mục tiêu nào → mô hình nào.*
 
 ## 7. Kết luận
 1. **Early Fusion V3** là mô hình triển khai: Recall@10 0,9004, vượt ALS +33,3% tương đối, CI95 không chồng lænd, McNemar 1.194:68.
