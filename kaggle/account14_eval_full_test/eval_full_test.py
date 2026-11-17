@@ -233,8 +233,8 @@ def score_chunk(users_chunk, seed_base):
     U=np.array(inst_u,dtype=np.int64); GT=np.array(inst_gt,dtype=np.int64); C=np.stack(inst_c)
     K=C.shape[1]
     ranks={m: np.empty(B,dtype=np.int16) for m in MODELS}
-    ua=als_u[U]; ia=als_i[C]; s_cf=np.einsum('bd,bkd->bk',ua,ia)
-    ub=bpr_u[U]; ib=bpr_i[C]; s_bpr=np.einsum('bd,bkd->bk',ub,ib)
+    ua=user_cf[U]; ia=item_cf[C]; s_cf=np.einsum('bd,bkd->bk',ua,ia)
+    ub=user_bpr[U]; ib=item_bpr[C]; s_bpr=np.einsum('bd,bkd->bk',ub,ib)
     ut=user_sbert[U]; it=np.asarray(item_sbert[C],dtype=np.float32); s_txt=np.einsum('bd,bkd->bk',ut,it)
     z_cf=np.stack([zscore(s_cf[i]) for i in range(B)])
     z_bpr=np.stack([zscore(s_bpr[i]) for i in range(B)])
