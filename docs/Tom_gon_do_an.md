@@ -139,5 +139,14 @@
 3. Phân tích lỗi sâu: bucket theo history/domain; log phân bố gate RGH v4.
 4. Temporal split; A/B test online.
 
+
+## 9. Lưu trữ & Demo trực tuyến
+- **Hugging Face Hub:** `Clync/datn-deep-hybrid-recommender-data` (dataset repo) — chứa toàn bộ artifact (~3.9 GB): EF V3 model, SBERT embeddings, ALS/BPR factors, metadata DBs, FAISS index.
+- **Tải về:** `python scripts/download_demo_artifacts.py` → tự động tải về `artifacts/`.
+- **Chạy demo:** `python scripts/run_demo.py --customer-id 12345 --top-k 10`.
+- **GitHub:** https://github.com/TnClync/DATN (code, báo cáo, kịch bản, sơ đồ).
+- **Kaggle:** kernels train/eval (minhteonguyn/train-early-fusion-v3-datn, minhteonguyn/train-sbert-v2-datn, minhteonguyn/eval-per-user-datn, minhteonguyn/eval-full-test-datn).
+
+
 ---
 *Báo cáo đầy đủ: `docs/Bao_cao_day_du.md` (Chương 1–12 + Phụ lục A–H, 6 sơ đồ, ~17.9k từ). Kịch bản bảo vệ: `docs/Kich_ban_bao_ve.md` (Q1–Q15). Cơ sở nền: `docs/Co_so_nen.md`.*
