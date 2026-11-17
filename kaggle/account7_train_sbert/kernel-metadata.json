@@ -1,5 +1,5 @@
 {
-  "id": "nguynteo/train-sbert-metadata-reviewer-datn",
+  "id": "minhteonguyn/train-sbert-metadata-reviewer-datn",
   "title": "Train SBERT (Metadata + Reviewer) DATN",
   "code_file": "train_sbert.ipynb",
   "language": "python",

@@ -1,0 +1,17 @@
+{
+  "id": "nguynteo/rebuild-item-metadata-datn",
+  "title": "Rebuild Item Metadata DATN",
+  "code_file": "build_item_metadata.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "false",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/finaldata"
+  ],
+  "competition_sources": [],
+  "kernel_sources": []
+}

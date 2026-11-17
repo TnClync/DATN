@@ -1,0 +1,18 @@
+{
+  "id": "minhteonguyn/train-blair-content-recommender",
+  "title": "Train BLaIR Content Recommender",
+  "code_file": "train_blair.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "minhteonguyn/datn-graph-factors"
+  ],
+  "kernel_sources": [
+    "minhteonguyn/train-cf-als-bpr-implicit"
+  ]
+}

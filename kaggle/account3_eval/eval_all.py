@@ -1,11 +1,17 @@
 #!/usr/bin/env python
-"""Full-test evaluation kernel: compare all trained models, no retraining.
+"""Full-test evaluation kernel: compare all trained models + Proposed Models (RGH, LambdaRank, Ensemble).
 
-Evaluates on EVERY eligible test user (users with >=3 train interactions and at
-least one test positive inside the SBERT-covered 200k-item catalog), not a
-sample. Protocol: 1 positive + 99 random negatives, leak-free SBERT profiles.
-
-Artifacts are mounted from `nguynteo/deep-hybrid-recommender-datn`.
+Protocol:
+- Leave-One-Out: 1 positive + 99 random negatives, shared catalog, leak-free SBERT profiles.
+- Validated without test-tuning leakage: Tuning and training of hybrid heads on validation split (tune_idx).
+- Evaluates:
+    1. Baselines: ALS, BPR, LightGCN, SBERT
+    2. Fusion Baselines: Late Fusion, Light-Gated, Deep-Early, Graph Light-Gated, Two-Tower, Transformer
+    3. Proposed RGH (CF-Anchored Residual Gated Hybrid with DCN-v2 and Listwise Ranking Loss)
+    4. Proposed Two-Stage LambdaRank (LightGBM)
+    5. Proposed Stacked Ensemble (RGH + LambdaRank + Transformer + LightGCN)
+- Metrics: HR@{5,10,20}, NDCG@{5,10,20}, MRR, Recall@10, Precision@10, Delta vs Baseline.
+- Artifacts mounted from `nguynteo/cf-als-bpr-implicit-datn` and companion kernels.
 """
 from __future__ import annotations
 
@@ -20,6 +26,21 @@ import pandas as pd
 import pyarrow.parquet as pq
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
+try:
+    import lightgbm as lgb
+    HAS_LGB = True
+except Exception:
+    HAS_LGB = False
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    HAS_MPL = True
+except Exception:
+    HAS_MPL = False
 
 MIN_INTERACTIONS = 3
 CATALOG = 2464371
@@ -66,11 +87,16 @@ def find_base_dir() -> Path:
 def find_file(name: str) -> Path:
     hits = sorted(Path("/kaggle/input").rglob(name))
     if not hits:
+        # Fallback to local artifacts directory if running outside kaggle
+        local_cand = list(Path("artifacts").rglob(name))
+        if local_cand:
+            return local_cand[0]
         print("MISSING input file:", name)
-        for root in sorted(Path("/kaggle/input").iterdir()):
-            print("  input:", root)
+        if Path("/kaggle/input").exists():
+            for root in sorted(Path("/kaggle/input").iterdir()):
+                print("  input:", root)
         raise FileNotFoundError(name)
-    # Prefer artifacts produced by the dedicated single-model training kernels.
+    # Prefer artifacts produced by dedicated single-model training kernels.
     preferred = []
     if name == "sbert_item_embeddings_f16.npy":
         preferred = [p for p in hits if "train-sbert" in str(p)]
@@ -100,6 +126,10 @@ def find_sbert_file(dim: int = SBERT_DIM):
                 return p
         except Exception:
             continue
+    # Fallback to local artifacts
+    local_sbert = Path("artifacts/eval_inputs/sbert_item_embeddings_f16.npy")
+    if local_sbert.exists():
+        return local_sbert
     return None
 
 
@@ -120,12 +150,12 @@ def map_ids(values: np.ndarray, ids: np.ndarray) -> tuple[np.ndarray, np.ndarray
 
 BASE_DIR = find_base_dir()
 print("Dataset:", BASE_DIR)
-OUT_DIR = Path("/kaggle/working")
+OUT_DIR = Path("/kaggle/working") if Path("/kaggle/working").exists() else Path("artifacts/results")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 t0 = time.time()
 print("\n" + "=" * 56)
-print("1. LOADING TRAINED ARTIFACTS (no retraining)")
+print("1. LOADING TRAINED ARTIFACTS")
 print("=" * 56)
 als_uf = np.load(find_file("als_user_factors_f16.npy"), mmap_mode="r")
 als_itf = np.load(find_file("als_item_factors_f16.npy")).astype(np.float32)
@@ -133,7 +163,8 @@ bpr_uf = np.load(find_file("bpr_user_factors_f16.npy"), mmap_mode="r")
 bpr_itf = np.load(find_file("bpr_item_factors_f16.npy")).astype(np.float32)
 item_sbert = np.load(find_sbert_file(), mmap_mode="r")
 sbert_path = find_sbert_file()
-assert sbert_path is not None, "768-d sbert_item_embeddings_f16.npy not found - run the SBERT kernel first"
+assert sbert_path is not None, "768-d sbert_item_embeddings_f16.npy not found"
+
 gate_path = find_file("light_gated_fusion.pt")
 deep_path = find_file("deep_early_fusion.pt")
 graph_gate_path = find_file("graph_light_gated_fusion.pt")
@@ -145,7 +176,8 @@ u_ids = np.load(find_file("user_ids.npy"))
 i_ids = np.load(find_file("item_ids.npy"))
 n_users, n_items = len(u_ids), len(i_ids)
 print(f"Ids: {n_users:,} users x {n_items:,} items | SBERT {item_sbert.shape}")
-# Only the first CATALOG rows are ever used; cache them in RAM as float32.
+
+# Only first CATALOG rows are used; cache them in RAM
 sbert_cat = np.asarray(item_sbert[:CATALOG], dtype=np.float32)
 assert sbert_cat.shape[1] == SBERT_DIM, f"expected {SBERT_DIM}-d SBERT, got {sbert_cat.shape}"
 print(f"SBERT catalog cache: {sbert_cat.shape} ({sbert_cat.nbytes / 1e6:.0f} MB)")
@@ -177,16 +209,16 @@ elig_users = users_cov[counts[users_cov] >= MIN_INTERACTIONS]
 N_full = len(elig_users)
 print(f"Eligible test users (>= {MIN_INTERACTIONS} train, positive in {CATALOG:,}-item catalog): {N_full:,}")
 
-# Sample 20% of eligible users for evaluation (random, reproducible)
-EVAL_SAMPLE_FRAC = 0.20
+# Sample users for fast, statistically reliable evaluation
+MAX_EVAL = int(os.environ.get("MAX_EVAL_USERS", "10000"))
+n_sample = min(MAX_EVAL, N_full)
 rng_sample = np.random.default_rng(12345)
-n_sample = int(round(N_full * EVAL_SAMPLE_FRAC))
 sample_idx = rng_sample.choice(N_full, size=n_sample, replace=False)
 elig_users = elig_users[sample_idx]
 N = len(elig_users)
-print(f"Sampled {EVAL_SAMPLE_FRAC*100:.0f}% for eval: {N:,} users (seed=12345, without replacement)")
+print(f"Sampled {N:,} users for evaluation (from {N_full:,} eligible, seed=12345, without replacement)")
 
-# all test positives for eligible users (catalog + non-catalog, to ban properly)
+# all test positives for eligible users
 def ismember(values: np.ndarray, members: np.ndarray) -> np.ndarray:
     s = np.sort(members)
     if len(s) == 0:
@@ -222,9 +254,10 @@ for u, k in u_to_row.items():
         n = float(np.linalg.norm(v))
         user_sbert[k] = (v / n) if n > 1e-8 else 0.0
 
+
 # ------------------------------------------------------------------ instances
 print("\n" + "=" * 56)
-print("3. BUILDING EVAL INSTANCES (all users)")
+print("3. BUILDING EVAL INSTANCES (1 positive + 99 negatives)")
 print("=" * 56)
 rng = np.random.default_rng(SEED)
 cands = np.empty((N, 100), dtype=np.int32)
@@ -270,11 +303,13 @@ gts = gts[kept]
 elig_users = elig_users[kept]
 user_sbert = user_sbert[kept]
 N = len(cands)
-print(f"Instances: {N:,}")
+print(f"Valid Instances: {N:,}")
 
-tune_idx = rng.choice(N, size=min(TUNE_N, N), replace=False)
-tune_mask = np.zeros(N, dtype=bool)
-tune_mask[tune_idx] = True
+# Tune split vs Test split
+tune_size = min(TUNE_N, N // 2)
+tune_idx = rng.choice(N, size=tune_size, replace=False)
+test_idx = np.setdiff1d(np.arange(N), tune_idx)
+print(f"Validation Tune users: {len(tune_idx):,}; Final Holdout Test users: {len(test_idx):,}")
 
 
 # ------------------------------------------------------------------- metrics
@@ -284,8 +319,6 @@ def positions_from_scores(scores: np.ndarray, pos: np.ndarray) -> np.ndarray:
 
 
 def metrics_from_positions(pos: np.ndarray, valid: np.ndarray | None = None) -> dict[str, float]:
-    """Rank -> metrics. `valid=False` rows count as misses (all metrics 0), matching
-    the retrieval protocol where an un-retrieved ground truth is a total miss."""
     pos = np.asarray(pos, dtype=np.float32)
     if valid is None:
         valid = np.ones(len(pos), dtype=bool)
@@ -295,9 +328,8 @@ def metrics_from_positions(pos: np.ndarray, valid: np.ndarray | None = None) -> 
         "HR@5": round(float(((posv < 5) & valid).mean()), 4),
         "HR@10": round(float(((posv < 10) & valid).mean()), 4),
         "HR@20": round(float(((posv < 20) & valid).mean()), 4),
-        "Recall@5": round(float(((posv < 5) & valid).mean()), 4),
         "Recall@10": round(float(((posv < 10) & valid).mean()), 4),
-        "Recall@20": round(float(((posv < 20) & valid).mean()), 4),
+        "Precision@10": round(float(((posv < 10) & valid).mean() / 10.0), 4),
         "NDCG@5": round(float(np.where((posv < 5) & valid, 1.0 / np.log2(posv + 2), 0.0).mean()), 4),
         "NDCG@10": round(float(np.where((posv < 10) & valid, 1.0 / np.log2(posv + 2), 0.0).mean()), 4),
         "NDCG@20": round(float(np.where((posv < 20) & valid, 1.0 / np.log2(posv + 2), 0.0).mean()), 4),
@@ -307,7 +339,6 @@ def metrics_from_positions(pos: np.ndarray, valid: np.ndarray | None = None) -> 
 
 
 def cf_batch(uf, itf, idx):
-    """Row index -> factor index via elig_users (rows are NOT compact user ids)."""
     items = itf[cands[idx]]                                  # B x 100 x d
     users = np.asarray(uf[elig_users[idx]], dtype=np.float32)  # B x d
     return np.einsum("bnd,bd->bn", items, users, optimize=True)
@@ -322,152 +353,65 @@ def mm_rows(x):
     mn = x.min(axis=1, keepdims=True)
     mx = x.max(axis=1, keepdims=True)
     rng_ = mx - mn
-    return np.where(rng_ < 1e-8, 0.0, (x - mn) / np.maximum(rng_, 1e-8))
+    return np.where(rng_ < 1e-8, 0.5, (x - mn) / np.maximum(rng_, 1e-8)).astype(np.float32)
 
+
+# ----------------------------------------------------------------- baselines
+print("\n" + "=" * 56)
+print("4. EVALUATING BASELINES ON TEST HOLDOUT")
+print("=" * 56)
 
 def eval_baseline(kind: str) -> dict[str, float]:
-    pos_all = np.empty(N, dtype=np.int32)
+    pos_all = np.empty(len(test_idx), dtype=np.int32)
     step = BATCH if kind != "sbert" else 512
-    for start in range(0, N, step):
-        idx = np.arange(start, min(start + step, N))
+    for start in range(0, len(test_idx), step):
+        idx = test_idx[start:start + step]
         if kind == "als":
             s = cf_batch(als_uf, als_itf, idx)
         elif kind == "bpr":
             s = cf_batch(bpr_uf, bpr_itf, idx)
+        elif kind == "lightgcn":
+            s = cf_batch(graph_uf, graph_itf, idx)
         else:
             s = sb_batch(idx)
-        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+        pos_all[start:start + len(idx)] = positions_from_scores(s, gt_pos[idx])
     return metrics_from_positions(pos_all)
 
+res_als = eval_baseline("als")
+print("ALS (CF Baseline):     ", res_als)
+res_bpr = eval_baseline("bpr")
+print("BPR (CF Baseline):     ", res_bpr)
+res_lightgcn = eval_baseline("lightgcn")
+print("LightGCN (Graph CF):   ", res_lightgcn)
+res_sbert = eval_baseline("sbert")
+print("SBERT (Content-Based): ", res_sbert)
 
-def eval_fusion(alpha: float, only_tune: bool = False) -> dict[str, float]:
-    rows = tune_idx if only_tune else rows_all
-    pos = np.empty(len(rows), dtype=np.int32)
-    for start in range(0, len(rows), 512):
-        idx = rows[start:start + 512]
+
+# -------------------------------------------------------------- late fusion
+print("\n" + "=" * 56)
+print("5. LATE FUSION (alpha tuned on VALIDATION subset)")
+print("=" * 56)
+def eval_fusion(alpha: float, idx_eval: np.ndarray) -> dict[str, float]:
+    pos = np.empty(len(idx_eval), dtype=np.int32)
+    for start in range(0, len(idx_eval), 512):
+        idx = idx_eval[start:start + 512]
         cf = cf_batch(als_uf, als_itf, idx)
         sb = sb_batch(idx)
         s = alpha * mm_rows(cf) + (1.0 - alpha) * mm_rows(sb)
         pos[start:start + len(idx)] = positions_from_scores(s, gt_pos[idx])
     return metrics_from_positions(pos)
 
-
-rows_all = np.arange(N)
-print("\n" + "=" * 56)
-print("4. BASELINES (all test users)")
-print("=" * 56)
-res_als = eval_baseline("als")
-print("ALS   :", res_als)
-res_bpr = eval_baseline("bpr")
-print("BPR   :", res_bpr)
-res_sbert = eval_baseline("sbert")
-print("SBERT :", res_sbert)
-
-print("\n" + "=" * 56)
-print("5. LATE FUSION (alpha tuned on 10k subset)")
-print("=" * 56)
 grid = {}
-best_alpha, best_hr = 0.9, -1.0
+best_alpha, best_hr = 0.8, -1.0
 for a in [0.0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
-    m = eval_fusion(a, only_tune=True)
+    m = eval_fusion(a, tune_idx)
     grid[a] = m
-    print(f"alpha={a}: tune HR@10={m['HR@10']:.4f}")
-    if m["HR@10"] > best_hr:
-        best_hr, best_alpha = m["HR@10"], a
-res_late = eval_fusion(best_alpha)
-print(f"Best alpha={best_alpha} -> {res_late}")
+    print(f"alpha={a:0.1f}: val HR@10={m['HR@10']:.4f}, NDCG@10={m['NDCG@10']:.4f}")
+    if m["NDCG@10"] > best_hr:
+        best_hr, best_alpha = m["NDCG@10"], a
 
-
-# ------------------------------------------------------------------ two-stage
-print("\n" + "=" * 56)
-print("6. TWO-STAGE RETRIEVAL (all test users)")
-print("=" * 56)
-ts_res = None
-ts_best = None
-RUN_TWO_STAGE = os.environ.get("RUN_TWO_STAGE", "0") == "1"
-if HAS_FAISS and RUN_TWO_STAGE:
-    # Both retrievers search the SAME shared 200k-item catalog used by every model.
-    cf_index = faiss.IndexFlatIP(als_itf.shape[1])
-    cf_index.add(als_itf[:CATALOG])
-    sb_index = faiss.IndexFlatIP(SBERT_DIM)
-    sb_index.add(sbert_cat)
-    print("FAISS indexes:", cf_index.ntotal, sb_index.ntotal)
-
-    # ---- retrieve once for every user, then reuse across alpha values ----------
-    print("FAISS searching all users (CF top-60 + SBERT top-60)...")
-    I_cf = np.empty((N, 60), dtype=np.int64)
-    I_sb = np.empty((N, 60), dtype=np.int64)
-    for start in range(0, N, 2048):
-        idx = rows_all[start:start + 2048]
-        _, ic = cf_index.search(np.asarray(als_uf[elig_users[idx]], dtype=np.float32), 60)
-        _, isb = sb_index.search(np.asarray(user_sbert[idx], dtype=np.float32), 60)
-        I_cf[start:start + len(idx)] = ic
-        I_sb[start:start + len(idx)] = isb
-        if start % 40960 == 0:
-            print(f"  search {start}/{N}")
-
-    def ts_rerank(alpha: float, idx: np.ndarray, with_hits: bool = False):
-        out = np.empty(len(idx), dtype=np.int32)
-        valid = np.zeros(len(idx), dtype=bool)
-        hits = np.zeros((len(idx), 3), dtype=bool)  # cf@50, sbert@50, union@100
-        for j, row in enumerate(idx):
-            row = int(row)
-            ban = banned_list[row]
-            gt = gts[row]
-            cf_ids = I_cf[row]
-            sb_ids = I_sb[row]
-            cf_top = cf_ids[~ismember(cf_ids, ban)][:50]
-            sb_top = sb_ids[~ismember(sb_ids, ban)][:50]
-            hits[j, 0] = bool(np.any(cf_top == gt))
-            hits[j, 1] = bool(np.any(sb_top == gt))
-            union = np.union1d(cf_top, sb_top)
-            if len(union) == 0 or not bool(np.any(union == gt)):
-                out[j] = 0
-                continue
-            hits[j, 2] = True
-            uf = np.asarray(als_uf[elig_users[row]], dtype=np.float32)
-            cfu = np.asarray(als_itf[union] @ uf, dtype=np.float32)
-            usb = np.asarray(user_sbert[row], dtype=np.float32)
-            sbu = sbert_cat[union] @ usb
-            fused = alpha * mm_rows(cfu[None, :])[0] + (1.0 - alpha) * mm_rows(sbu[None, :])[0]
-            gt_score = fused[np.where(union == gt)[0][0]]
-            out[j] = int((fused > gt_score).sum())
-            valid[j] = True
-        if with_hits:
-            return out, valid, hits
-        return out, valid
-
-    # tune two-stage alpha on the same 10k subset (cached retrieval)
-    ts_best, ts_best_hr = 1.0, -1.0
-    for a in [0.0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
-        pos, ok = ts_rerank(a, tune_idx)
-        m = metrics_from_positions(pos, ok)
-        print(f"two-stage alpha={a}: tune HR@10={m['HR@10']:.4f}")
-        if m["HR@10"] > ts_best_hr:
-            ts_best_hr, ts_best = m["HR@10"], a
-
-    print(f"Two-stage best alpha={ts_best} -> full evaluation...")
-    pos_all = np.empty(N, dtype=np.int32)
-    ok_all = np.zeros(N, dtype=bool)
-    hits_all = np.zeros((N, 3), dtype=bool)
-    for start in range(0, N, 4096):
-        idx = rows_all[start:start + 4096]
-        p, ok, hits = ts_rerank(ts_best, idx, with_hits=True)
-        pos_all[start:start + len(idx)] = p
-        ok_all[start:start + len(idx)] = ok
-        hits_all[start:start + len(idx)] = hits
-        if start % 40960 == 0:
-            print(f"  two-stage {start}/{N}")
-    ts_res = metrics_from_positions(pos_all, ok_all)
-    ts_recall = {
-        "cf@50": round(float(hits_all[:, 0].mean()), 4),
-        "sbert@50": round(float(hits_all[:, 1].mean()), 4),
-        "union@100": round(float(hits_all[:, 2].mean()), 4),
-    }
-    print("Two-stage retrieval recall:", ts_recall)
-else:
-    print("Skipping two-stage: faiss not available")
-    ts_recall = None
+res_late = eval_fusion(best_alpha, test_idx)
+print(f"Best alpha={best_alpha} on Validation -> Holdout Test: {res_late}")
 
 
 # ---------------------------------------------------------------- deep heads
@@ -529,37 +473,42 @@ class TransformerFusion(nn.Module):
                                                   batch_first=True, activation="gelu")
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=nlayers)
         self.head = nn.Linear(d_model, 1)
+
     def forward(self, x):
-        h = self.proj(x)
-        h = self.encoder(h)
+        h = self.encoder(self.proj(x))
         return self.head(h).squeeze(-1)
 
 
+print("\n" + "=" * 56)
+print("6. LOADING PRETRAINED DEEP HYBRID HEADS")
+print("=" * 56)
 gate_model = LightGate()
 gate_model.load_state_dict(torch.load(gate_path, map_location="cpu"))
 gate_model.eval()
+
 deep_model = DeepEarlyFusion(32 + 32 + SBERT_DIM)
 deep_model.load_state_dict(torch.load(deep_path, map_location="cpu"))
 deep_model.eval()
+
 graph_gate_model = LightGate()
 graph_gate_model.load_state_dict(torch.load(graph_gate_path, map_location="cpu"))
 graph_gate_model.eval()
+
 user_tower = UserTower()
 item_tower = ItemTower()
 tt_state = torch.load(two_tower_path, map_location="cpu")
 user_tower.load_state_dict(tt_state["user"])
 item_tower.load_state_dict(tt_state["item"])
-user_tower.eval()
-item_tower.eval()
+user_tower.eval(); item_tower.eval()
+
 transformer_model = TransformerFusion()
 transformer_model.load_state_dict(torch.load(transformer_path, map_location="cpu"))
 transformer_model.eval()
 
-
 def eval_deep_head(kind: str) -> dict[str, float]:
-    pos_all = np.empty(N, dtype=np.int32)
-    for start in range(0, N, DEEP_BATCH):
-        idx = np.arange(start, min(start + DEEP_BATCH, N))
+    pos_all = np.empty(len(test_idx), dtype=np.int32)
+    for start in range(0, len(test_idx), DEEP_BATCH):
+        idx = test_idx[start:start + DEEP_BATCH]
         b = len(idx)
         c = cands[idx]
         u_cf = np.asarray(als_uf[elig_users[idx]], dtype=np.float32)
@@ -578,14 +527,14 @@ def eval_deep_head(kind: str) -> dict[str, float]:
                 feats = np.concatenate([
                     np.repeat(u_cf[:, None, :], 100, axis=1), i_cf, i_sb], axis=2)
                 s = deep_model(torch.from_numpy(feats.reshape(b * 100, -1))).numpy().reshape(b, 100)
-        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+        pos_all[start:start + len(idx)] = positions_from_scores(s, gt_pos[idx])
     return metrics_from_positions(pos_all)
 
 
 def eval_graph_gate() -> dict[str, float]:
-    pos_all = np.empty(N, dtype=np.int32)
-    for start in range(0, N, DEEP_BATCH):
-        idx = np.arange(start, min(start + DEEP_BATCH, N))
+    pos_all = np.empty(len(test_idx), dtype=np.int32)
+    for start in range(0, len(test_idx), DEEP_BATCH):
+        idx = test_idx[start:start + DEEP_BATCH]
         b = len(idx)
         c = cands[idx]
         u_cf = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)
@@ -599,106 +548,338 @@ def eval_graph_gate() -> dict[str, float]:
                 torch.from_numpy(i_cf), torch.from_numpy(i_sb),
                 torch.from_numpy(cf), torch.from_numpy(sb))
             s = fused.numpy()
-        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+        pos_all[start:start + len(idx)] = positions_from_scores(s, gt_pos[idx])
     return metrics_from_positions(pos_all)
 
 
 def eval_two_tower() -> dict[str, float]:
-    pos_all = np.empty(N, dtype=np.int32)
-    for start in range(0, N, DEEP_BATCH):
-        idx = np.arange(start, min(start + DEEP_BATCH, N))
+    pos_all = np.empty(len(test_idx), dtype=np.int32)
+    for start in range(0, len(test_idx), DEEP_BATCH):
+        idx = test_idx[start:start + DEEP_BATCH]
         b = len(idx)
         c = cands[idx]
-        u_in = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)  # (b, 32)
-        i_in = np.concatenate([np.asarray(graph_itf[c], dtype=np.float32),
-                               sbert_cat[c]], axis=2)  # (b, 100, 32+768)
+        u_in = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)
+        i_in = np.concatenate([np.asarray(graph_itf[c], dtype=np.float32), sbert_cat[c]], axis=2)
         with torch.no_grad():
-            u_emb = user_tower(torch.from_numpy(u_in)).numpy()  # (b, 64)
+            u_emb = user_tower(torch.from_numpy(u_in)).numpy()
             i_emb = item_tower(torch.from_numpy(i_in.reshape(b * 100, -1))).numpy().reshape(b, 100, -1)
             s = np.einsum("bd,bnd->bn", u_emb, i_emb, optimize=True)
-        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
+        pos_all[start:start + len(idx)] = positions_from_scores(s, gt_pos[idx])
     return metrics_from_positions(pos_all)
 
 
-def eval_transformer() -> dict[str, float]:
-    pos_all = np.empty(N, dtype=np.int32)
-    BATCH_U = 16
-    for start in range(0, N, BATCH_U):
-        idx = np.arange(start, min(start + BATCH_U, N))
+def eval_transformer() -> tuple[dict[str, float], np.ndarray]:
+    pos_all = np.empty(len(test_idx), dtype=np.int32)
+    scores_out = np.empty((len(test_idx), 100), dtype=np.float32)
+    BATCH_U = 32
+    for start in range(0, len(test_idx), BATCH_U):
+        idx = test_idx[start:start + BATCH_U]
         b = len(idx)
         c = cands[idx]
-        u_cf = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)  # (b, 32)
-        i_cf = np.asarray(graph_itf[c], dtype=np.float32)  # (b, 100, 32)
-        i_sb = sbert_cat[c]  # (b, 100, 768)
+        u_cf = np.asarray(graph_uf[elig_users[idx]], dtype=np.float32)
+        i_cf = np.asarray(graph_itf[c], dtype=np.float32)
+        i_sb = sbert_cat[c]
         feats = np.concatenate([
-            np.repeat(u_cf[:, None, :], 100, axis=1), i_cf, i_sb], axis=2).astype(np.float32)  # (b, 100, 832)
+            np.repeat(u_cf[:, None, :], 100, axis=1), i_cf, i_sb], axis=2).astype(np.float32)
         with torch.no_grad():
-            s = transformer_model(torch.from_numpy(feats)).numpy()  # (b, 100)
-        pos_all[idx] = positions_from_scores(s, gt_pos[idx])
-    return metrics_from_positions(pos_all)
+            s = transformer_model(torch.from_numpy(feats)).numpy()
+        pos_all[start:start + len(idx)] = positions_from_scores(s, gt_pos[idx])
+        scores_out[start:start + len(idx)] = s
+    return metrics_from_positions(pos_all), scores_out
 
-
-print("\n" + "=" * 56)
-print("7. DEEP HYBRID HEADS (all test users)")
-print("=" * 56)
 res_gate = eval_deep_head("gate")
-print("Light Gated:", res_gate)
+print("Light Gated:      ", res_gate)
 res_deep = eval_deep_head("deep")
-print("Deep Early :", res_deep)
+print("Deep Early:       ", res_deep)
 res_graph_gate = eval_graph_gate()
 print("Graph Light Gated:", res_graph_gate)
 res_two_tower = eval_two_tower()
-print("Two-Tower:", res_two_tower)
-res_transformer = eval_transformer()
-print("Transformer:", res_transformer)
+print("Two-Tower:        ", res_two_tower)
+res_transformer, transformer_test_scores = eval_transformer()
+print("Transformer:      ", res_transformer)
+
+
+# --------------------------------------------------- feature extraction for RGH
+print("\n" + "=" * 56)
+print("7. EXTRACTING NORMALIZED MULTI-BRANCH FEATURES FOR PROPOSED MODELS")
+print("=" * 56)
+def extract_branch_features(idx_arr: np.ndarray):
+    # Computes per-user normalized branch scores
+    s_als = cf_batch(als_uf, als_itf, idx_arr)
+    s_bpr = cf_batch(bpr_uf, bpr_itf, idx_arr)
+    s_gcn = cf_batch(graph_uf, graph_itf, idx_arr)
+    s_txt = sb_batch(idx_arr)
+    
+    z_als = mm_rows(s_als)
+    z_bpr = mm_rows(s_bpr)
+    z_gcn = mm_rows(s_gcn)
+    z_txt = mm_rows(s_txt)
+    diff_cf = z_als - z_gcn
+    cross_txt = z_als * z_txt
+    feats = np.stack([z_als, z_bpr, z_gcn, z_txt, diff_cf, cross_txt], axis=-1).astype(np.float32)
+    return {
+        "z_als": z_als, "z_bpr": z_bpr, "z_gcn": z_gcn, "z_txt": z_txt, "feats": feats
+    }
+
+val_feats_dict = extract_branch_features(tune_idx)
+test_feats_dict = extract_branch_features(test_idx)
+
+
+# -------------------------------------------------------- PROPOSED MODEL 1: RGH
+print("\n" + "=" * 56)
+print("8. PROPOSED MODEL: CF-ANCHORED RESIDUAL GATED HYBRID (RGH)")
+print("=" * 56)
+
+class ResidualGatedHybrid(nn.Module):
+    """
+    CF-Anchored Residual Gated Hybrid (RGH) as specified in Section 5 of
+    Ke_hoach_cai_thien_mo_hinh_va_co_so_lap_luan.md:
+    score(u, i) = a_cf * z_cf + a_gcn * z_gcn + a_txt * z_txt + g(h_u, h_i) * Delta(u, i)
+    """
+    def __init__(self, in_features: int = 6, hidden_dim: int = 64):
+        super().__init__()
+        # Initialized to strongly anchor on CF and Graph CF
+        self.a_cf = nn.Parameter(torch.tensor(0.60, dtype=torch.float32))
+        self.a_gcn = nn.Parameter(torch.tensor(0.30, dtype=torch.float32))
+        self.a_txt = nn.Parameter(torch.tensor(0.10, dtype=torch.float32))
+
+        # DCN-v2 Style Feature Crossing for non-linear residual
+        self.cross1 = nn.Linear(in_features, in_features)
+        self.cross2 = nn.Linear(in_features, in_features)
+        self.deep = nn.Sequential(
+            nn.Linear(in_features, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
+        # Residual Gate with negative bias initialization (initially g ~ 0.075)
+        self.gate_net = nn.Sequential(
+            nn.Linear(in_features, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+        nn.init.constant_(self.gate_net[-1].bias, -2.5)
+
+    def forward(self, feats, z_cf, z_gcn, z_txt):
+        # 1. CF-Anchored Linear Foundation
+        linear_anchor = self.a_cf * z_cf + self.a_gcn * z_gcn + self.a_txt * z_txt
+        # 2. Cross & Deep Residual
+        x0 = feats
+        x1 = x0 * torch.sigmoid(self.cross1(x0)) + x0
+        x2 = x0 * torch.sigmoid(self.cross2(x1)) + x1
+        delta = self.deep(x2).squeeze(-1)
+        # 3. Residual Gating
+        gate = torch.sigmoid(self.gate_net(feats)).squeeze(-1)
+        return linear_anchor + gate * delta
+
+
+def train_rgh_model(val_dict: dict, val_gt_pos: np.ndarray, epochs: int = 12):
+    model = ResidualGatedHybrid(in_features=6, hidden_dim=64)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.005, weight_decay=1e-4)
+    
+    t_feats = torch.from_numpy(val_dict["feats"]).float()
+    t_zcf = torch.from_numpy(val_dict["z_als"]).float()
+    t_zgcn = torch.from_numpy(val_dict["z_gcn"]).float()
+    t_ztxt = torch.from_numpy(val_dict["z_txt"]).float()
+    t_gt = torch.from_numpy(val_gt_pos).long()
+    
+    dataset = TensorDataset(t_feats, t_zcf, t_zgcn, t_ztxt, t_gt)
+    loader = DataLoader(dataset, batch_size=128, shuffle=True)
+    
+    model.train()
+    for ep in range(epochs):
+        total_loss = 0.0
+        for b_f, b_cf, b_gcn, b_txt, b_gt in loader:
+            optimizer.zero_grad()
+            scores = model(b_f, b_cf, b_gcn, b_txt)
+            loss = nn.functional.cross_entropy(scores / 0.20, b_gt) # tau = 0.2
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * len(b_gt)
+        if (ep + 1) % 4 == 0 or ep == 0:
+            print(f"  [RGH Epoch {ep+1:02d}/{epochs}] Loss = {total_loss/len(t_gt):.4f} "
+                  f"(a_cf={model.a_cf.item():.3f}, a_gcn={model.a_gcn.item():.3f}, a_txt={model.a_txt.item():.3f})")
+    model.eval()
+    return model
+
+print("Training RGH with Listwise Ranking Loss on Validation split...")
+rgh_model = train_rgh_model(val_feats_dict, gt_pos[tune_idx], epochs=12)
+
+# Evaluate RGH on Holdout Test
+with torch.no_grad():
+    rgh_test_scores = rgh_model(
+        torch.from_numpy(test_feats_dict["feats"]).float(),
+        torch.from_numpy(test_feats_dict["z_als"]).float(),
+        torch.from_numpy(test_feats_dict["z_gcn"]).float(),
+        torch.from_numpy(test_feats_dict["z_txt"]).float()
+    ).numpy()
+
+pos_rgh = positions_from_scores(rgh_test_scores, gt_pos[test_idx])
+res_rgh = metrics_from_positions(pos_rgh)
+print("PROPOSED RGH:     ", res_rgh)
+
+
+# -------------------------------------------------- PROPOSED MODEL 2: LAMBDARANK
+print("\n" + "=" * 56)
+print("9. PROPOSED MODEL: TWO-STAGE LAMBDARANK (LIGHTGBM)")
+print("=" * 56)
+if HAS_LGB:
+    N_tune = len(tune_idx)
+    X_val = val_feats_dict["feats"].reshape(N_tune * 100, -1)
+    y_val = np.zeros((N_tune, 100), dtype=np.int32)
+    for i, g in enumerate(gt_pos[tune_idx]):
+        y_val[i, g] = 1
+    y_val = y_val.reshape(-1)
+    q_val = [100] * N_tune
+
+    ranker = lgb.LGBMRanker(
+        objective="lambdarank",
+        metric="ndcg",
+        eval_at=[5, 10, 20],
+        n_estimators=100,
+        learning_rate=0.05,
+        num_leaves=31,
+        min_child_samples=20,
+        random_state=SEED,
+        n_jobs=-1
+    )
+    print("Fitting LightGBM LambdaRank on Validation queries...")
+    ranker.fit(X_val, y_val, group=q_val)
+
+    N_t = len(test_idx)
+    X_test = test_feats_dict["feats"].reshape(N_t * 100, -1)
+    lgb_test_scores = ranker.predict(X_test).reshape(N_t, 100)
+    pos_lgb = positions_from_scores(lgb_test_scores, gt_pos[test_idx])
+    res_lgb = metrics_from_positions(pos_lgb)
+    print("PROPOSED LambdaRank:", res_lgb)
+else:
+    print("LightGBM not installed, skipping LambdaRank")
+    res_lgb = None
+    lgb_test_scores = rgh_test_scores
+
+
+# --------------------------------------------------- PROPOSED MODEL 3: ENSEMBLE
+print("\n" + "=" * 56)
+print("10. PROPOSED: STACKED ENSEMBLE HYBRID")
+print("=" * 56)
+# Blend RGH + LambdaRank + Transformer Fusion + LightGCN
+s_ens = (0.35 * mm_rows(rgh_test_scores) + 
+         0.35 * mm_rows(lgb_test_scores) + 
+         0.20 * mm_rows(transformer_test_scores) + 
+         0.10 * mm_rows(test_feats_dict["z_gcn"]))
+pos_ens = positions_from_scores(s_ens, gt_pos[test_idx])
+res_ensemble = metrics_from_positions(pos_ens)
+print("PROPOSED Stacked Ensemble:", res_ensemble)
 
 
 # -------------------------------------------------------------------- summary
 summary = {
-    "protocol": "Random 20% sample of eligible test users (seed=12345, without replacement), 1 positive + 99 random negatives, shared 200k-item catalog, leak-free SBERT profiles",
+    "protocol": "Strict Leave-One-Out (1 Positive from Test split + 99 Random Negatives), shared 2.46M catalog, leak-free SBERT profiles, zero test tuning leakage",
     "eval_catalog_items": CATALOG,
-    "n_test_positive_rows": int(len(tu)),
-    "n_eval_users": int(N),
+    "n_test_users_holdout": int(len(test_idx)),
+    "n_validation_users_tune": int(len(tune_idx)),
     "min_interactions": MIN_INTERACTIONS,
-    "als": res_als,
-    "bpr": res_bpr,
-    "sbert": res_sbert,
-    "late_fusion": {"best_alpha": best_alpha, "tune_HR10": round(best_hr, 4),
-                    "test": res_late, "grid_tune": {str(a): m for a, m in grid.items()}},
-    "two_stage": ({"best_alpha": ts_best, "tune_HR10": round(ts_best_hr, 4),
-                   "test": ts_res, "retrieval_recall": ts_recall}
-                  if ts_res is not None else None),
-    "light_gated": res_gate,
-    "deep_early_fusion": res_deep,
-    "graph_light_gated": res_graph_gate,
-    "two_tower": res_two_tower,
-    "transformer": res_transformer,
-    "eval_time_sec": round(time.time() - t0, 1),
+    "models": {
+        "ALS (CF Baseline)": res_als,
+        "BPR (CF Baseline)": res_bpr,
+        "LightGCN (Graph CF)": res_lightgcn,
+        "SBERT Alone (CB)": res_sbert,
+        f"Late Fusion (alpha={best_alpha})": res_late,
+        "Light Gated Fusion": res_gate,
+        "Deep Early Fusion": res_deep,
+        "Graph Light Gated": res_graph_gate,
+        "Two-Tower": res_two_tower,
+        "Transformer Fusion": res_transformer,
+        "Proposed RGH (Residual Gated Hybrid)": res_rgh,
+        "Proposed Two-Stage LambdaRank (LightGBM)": res_lgb,
+        "Proposed Stacked Ensemble": res_ensemble
+    },
+    "eval_time_sec": round(time.time() - t0, 1)
 }
 (OUT_DIR / "eval_summary.json").write_text(json.dumps(summary, indent=2))
 
-print("\n" + "=" * 76)
-print(f"FINAL COMPARISON (ALL TEST SET, N={N:,})")
-print("=" * 76)
-print(f"{'Model':<26} {'HR@5':>7} {'HR@10':>7} {'HR@20':>7} {'NDCG@10':>8} {'MRR':>7} {'Recall@10':>10}")
-rows = [
-    ("ALS", res_als),
-    ("BPR", res_bpr),
-    ("SBERT", res_sbert),
-    (f"Late Fusion (a={best_alpha})", res_late),
-    ((f"Two-Stage (a={ts_best})", ts_res) if ts_res else ("Two-Stage", None)),
+print("\n" + "=" * 88)
+print(f"FINAL BENCHMARK COMPARISON ON TEST HOLDOUT (N={len(test_idx):,})")
+print("=" * 88)
+print(f"{'Model Architecture':<42} {'HR@5':>7} {'HR@10':>7} {'HR@20':>7} {'NDCG@10':>8} {'MRR':>7} {'Delta ALS':>10}")
+print("-" * 88)
+
+als_hr10 = res_als["HR@10"]
+models_to_display = [
+    ("ALS (CF Baseline)", res_als),
+    ("BPR (CF Baseline)", res_bpr),
+    ("LightGCN (Graph CF)", res_lightgcn),
+    ("SBERT Alone (CB)", res_sbert),
+    (f"Late Fusion (alpha={best_alpha})", res_late),
     ("Light Gated Fusion", res_gate),
     ("Deep Early Fusion", res_deep),
     ("Graph Light Gated", res_graph_gate),
-    ("Two-Tower", res_two_tower),
+    ("Two-Tower (Deep Hybrid)", res_two_tower),
     ("Transformer Fusion", res_transformer),
+    ("★ Proposed RGH (Residual Gated)", res_rgh),
+    ("★ Proposed LambdaRank (LightGBM)", res_lgb),
+    ("★ Proposed Stacked Ensemble", res_ensemble)
 ]
-for name, m in rows:
+
+for name, m in models_to_display:
     if m is None:
-        print(f"{name:<26} {'n/a':>7}")
         continue
-    print(f"{name:<26} {m['HR@5']:>7.4f} {m['HR@10']:>7.4f} {m['HR@20']:>7.4f} "
-          f"{m['NDCG@10']:>8.4f} {m['MRR']:>7.4f} {m['Recall@10']:>10.4f}")
-print("=" * 76)
-print(json.dumps(summary, indent=2))
-print("DONE in", round(time.time() - t0, 1), "s")
+    delta_als = (m["HR@10"] - als_hr10) / als_hr10 * 100.0
+    sign = "+" if delta_als >= 0 else ""
+    delta_str = f"{sign}{delta_als:.1f}%"
+    print(f"{name:<42} {m['HR@5']:>7.4f} {m['HR@10']:>7.4f} {m['HR@20']:>7.4f} "
+          f"{m['NDCG@10']:>8.4f} {m['MRR']:>7.4f} {delta_str:>10}")
+print("=" * 88)
+
+# ----------------------------------------------------------------- visualization
+if HAS_MPL:
+    try:
+        plot_names = [
+            "ALS", "BPR", "LightGCN", "SBERT", "Late Fusion",
+            "Two-Tower", "Transformer", "RGH (Proposed)", "LambdaRank (Proposed)", "Ensemble (Proposed)"
+        ]
+        plot_m = [
+            res_als, res_bpr, res_lightgcn, res_sbert, res_late,
+            res_two_tower, res_transformer, res_rgh, res_lgb, res_ensemble
+        ]
+        
+        valid_plots = [(n, m) for n, m in zip(plot_names, plot_m) if m is not None]
+        labels = [x[0] for x in valid_plots]
+        hr10_vals = [x[1]["HR@10"] for x in valid_plots]
+        ndcg10_vals = [x[1]["NDCG@10"] for x in valid_plots]
+        
+        x = np.arange(len(labels))
+        width = 0.38
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
+        rects1 = ax.bar(x - width/2, hr10_vals, width, label='HR@10', color='#2563eb')
+        rects2 = ax.bar(x + width/2, ndcg10_vals, width, label='NDCG@10', color='#10b981')
+        
+        ax.set_ylabel('Score', fontsize=12)
+        ax.set_title('Recommender System Model Comparison (Amazon Reviews 2.46M Catalog)', fontsize=14, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=25, ha='right', fontsize=10)
+        ax.legend(fontsize=11)
+        ax.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        # Add values on top of bars
+        for bar in rects1:
+            h = bar.get_height()
+            ax.annotate(f'{h:.3f}', xy=(bar.get_x() + bar.get_width() / 2, h),
+                        xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+        for bar in rects2:
+            h = bar.get_height()
+            ax.annotate(f'{h:.3f}', xy=(bar.get_x() + bar.get_width() / 2, h),
+                        xytext=(0, 3), textcoords="offset points", ha='center', va='bottom', fontsize=8)
+            
+        fig.tight_layout()
+        chart_path = OUT_DIR / "datn_recsys_model_benchmark.png"
+        plt.savefig(chart_path, dpi=300)
+        plt.close()
+        print(f"\nSaved benchmark comparison chart to: {chart_path}")
+    except Exception as e:
+        print("Plotting error:", e)
+
+print(f"\nAll evaluations completed successfully in {round(time.time() - t0, 1)}s")

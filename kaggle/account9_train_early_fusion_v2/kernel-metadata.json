@@ -1,0 +1,21 @@
+{
+  "id": "minhteonguyn/train-early-fusion-v2-datn",
+  "title": "Train early fusion v2 DATN",
+  "code_file": "train_early_fusion_v2.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "false",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "nguynteo/lastreview",
+    "nguynteo/item-profile"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "nguynteo/train-sbert-metadata-reviewer-datn",
+    "nguynteo/cf-als-bpr-implicit-datn"
+  ]
+}

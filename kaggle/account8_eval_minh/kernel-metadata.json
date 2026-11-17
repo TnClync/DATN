@@ -1,0 +1,22 @@
+{
+  "id": "minhteonguyn/eval-all-recommender-models-datn",
+  "title": "Eval All Recommender Models DATN",
+  "code_file": "eval_all.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "dataset_sources": [
+    "nguynteo/lastone",
+    "minhteonguyn/datn-graph-factors"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "minhteonguyn/train-cf-als-bpr-implicit",
+    "minhteonguyn/train-deep-hybrid-recommender",
+    "minhteonguyn/sbert-cb-faiss",
+    "minhteonguyn/train-blair-content-recommender"
+  ]
+}

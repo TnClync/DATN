@@ -6,6 +6,7 @@ Primary User Input: customerID (e.g. 'A37OJC78HSOXXN' or numeric ID).
 """
 from __future__ import annotations
 
+import html
 import json
 import random
 import sqlite3
@@ -209,12 +210,82 @@ def models():
             {"id": "late_fusion", "name": "Late Fusion (ALS + SBERT)", "type": "Hybrid", "desc": "Linear combination with dynamic weight alpha"},
             {"id": "light_gated", "name": "Light Gated Late Fusion", "type": "Deep Hybrid", "desc": "Neural gate learns a per-(user,item) fusion weight"},
             {"id": "deep_early", "name": "Deep Early Fusion (DCN)", "type": "Deep Hybrid", "desc": "Cross-network over [user_cf, item_cf, item_sbert]"},
+            {"id": "graph_light_gated", "name": "Graph Light Gated", "type": "Deep Hybrid", "desc": "Light gate with LightGCN graph factors"},
+            {"id": "two_tower", "name": "Two-Tower", "type": "Deep Hybrid", "desc": "User tower · Item tower (graph + SBERT)"},
+            {"id": "ensemble", "name": "Stacked Ensemble (all models)", "type": "Deep Hybrid", "desc": "Weighted blend of the trained models, weights tuned by greedy selection on a held-out slice"},
+            {"id": "transformer", "name": "Transformer Fusion", "type": "Deep Hybrid", "desc": "Self-attention over candidates"},
             {"id": "two_stage", "name": "Two-Stage Retrieval", "type": "Deep Hybrid", "desc": "CF + CB Candidate Union (300) -> Reranking"},
             {"id": "als", "name": "Alternating Least Squares (ALS)", "type": "Collaborative", "desc": "Implicit matrix factorization (factors=32, min_interactions=3)"},
             {"id": "bpr", "name": "Bayesian Personalized Ranking (BPR)", "type": "Collaborative", "desc": "Pairwise ranking optimization (factors=32, min_interactions=3)"},
             {"id": "sbert", "name": "SBERT Content-Based", "type": "Content", "desc": "all-MiniLM-L6-v2 + FAISS IndexFlatIP"}
         ]
     }
+
+
+_HISTORY_DB = ARTIFACTS_DIR / "user_history.db"
+
+
+def get_user_history(user_idx: int, limit: int = 50) -> list[int]:
+    """Recent train-split items of a user (latest first, original item ids).
+
+    Used when the client does not pass a history: the content / deep hybrid
+    heads need a profile, otherwise they collapse to pure CF (and alpha has
+    no effect on the ranking).
+    """
+    if not _HISTORY_DB.exists():
+        return []
+    try:
+        conn = sqlite3.connect(str(_HISTORY_DB))
+        row = conn.execute("SELECT items FROM history WHERE user_idx = ?",
+                           (int(user_idx),)).fetchone()
+        conn.close()
+        if not row or row[0] is None:
+            return []
+        arr = np.frombuffer(row[0], dtype=np.int32)
+        return [int(x) for x in arr[:limit]]
+    except Exception:
+        return []
+
+
+def _listing_key(meta: dict[str, Any]) -> str | None:
+    """Key identifying a *listing*, not an item id.
+
+    The Amazon catalog contains many duplicate listings of the same product
+    (same title + brand, different item_idx). Recommenders score them almost
+    identically, so the same product shows up several times in one page.
+    """
+    title = " ".join(html.unescape(str(meta.get("title") or "")).lower().split())
+    if len(title) < 3 or title.startswith("item "):
+        return None                      # placeholder title -> never collapse
+    brand = " ".join(html.unescape(str(meta.get("brand") or "")).lower().split())
+    return f"{title}|{brand}"
+
+
+def _dedup_listings(items: list[int], metas: list[dict[str, Any]], k: int):
+    """Keep the first listing of each product, then fill up to k if needed."""
+    seen: set[str] = set()
+    out_items: list[int] = []
+    out_metas: list[dict[str, Any]] = []
+    leftovers: list[tuple[int, dict[str, Any]]] = []
+    for it, meta in zip(items, metas):
+        key = _listing_key(meta)
+        if key is not None and key in seen:
+            leftovers.append((it, meta))
+            continue
+        if key is not None:
+            seen.add(key)
+        out_items.append(it)
+        out_metas.append(meta)
+        if len(out_items) >= k:
+            break
+    # Not enough unique products: pad with duplicate listings rather than
+    # returning a short page.
+    for it, meta in leftovers:
+        if len(out_items) >= k:
+            break
+        out_items.append(it)
+        out_metas.append(meta)
+    return out_items[:k], out_metas[:k]
 
 
 @app.post("/recommend")
@@ -230,18 +301,28 @@ def recommend(req: RecommendRequest):
     cf_override = "bpr" if req.model == "bpr" else "als" if req.model == "als" else None
     t0 = time.perf_counter()
     pl = get_pipeline(cf_override)
-    items = pl.recommend(
+    history = list(req.history or [])
+    history_source = "request"
+    if not history:
+        history = get_user_history(uidx)
+        history_source = "train_split" if history else "none"
+    # ask for extra candidates so duplicate listings can be collapsed
+    pool = min(max(req.k * 4, req.k + 30), 400)
+    raw_items = pl.recommend(
         user_idx=uidx,
-        user_history=req.history,
-        k=req.k,
+        user_history=history,
+        k=pool,
         model=req.model,
         alpha=alpha,
     )
+    raw_meta = [get_item_metadata(it) for it in raw_items]
+    items, items_meta = _dedup_listings(raw_items, raw_meta, req.k)
     latency_ms = round((time.perf_counter() - t0) * 1000, 2)
-    items_meta = [get_item_metadata(it) for it in items]
 
     ms = getattr(pl, "head_status", {}) or {}
-    sdim = int(pl.sbert_emb.shape[1]) if getattr(pl, "sbert_emb", None) is not None and hasattr(pl.sbert_emb, "shape") else None
+    graph_models = ("graph_light_gated", "two_tower", "transformer")
+    sb_mat = getattr(pl, "sbert_emb_768" if req.model in graph_models else "sbert_emb", None)
+    sdim = int(sb_mat.shape[1]) if sb_mat is not None and hasattr(sb_mat, "shape") else None
     return {
         "customer_id": cid,
         "user_idx": uidx,
@@ -252,8 +333,10 @@ def recommend(req: RecommendRequest):
         "latency_ms": latency_ms,
         "items": items,
         "items_meta": items_meta,
-        "model_status": {k: v for k, v in ms.items() if k in (req.model, "light_gated", "deep_early")} if ms else {},
+        "model_status": ms,
         "sbert_dim": sdim,
+        "history_size": len(history),
+        "history_source": history_source,
     }
 
 

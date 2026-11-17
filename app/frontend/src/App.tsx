@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line
@@ -16,8 +16,12 @@ import ModelArchitectureDiagram from './components/ModelArchitectureDiagram';
 import type { Product, SampleUser, ResolvedUser, SimResult } from './types';
 
 const MODELS = [
+  { id: 'ensemble', name: 'Stacked Ensemble (all models)', type: 'Deep Hybrid', desc: 'Weighted blend of the trained models (CF + SBERT + graph + deep heads)' },
   { id: 'light_gated', name: 'Light Gated Late Fusion', type: 'Deep Hybrid', desc: 'Neural gate learns a per-(user,item) fusion weight' },
   { id: 'deep_early', name: 'Deep Early Fusion (DCN)', type: 'Deep Hybrid', desc: 'Cross-network over [user_cf, item_cf, item_sbert]' },
+  { id: 'graph_light_gated', name: 'Graph Light Gated', type: 'Deep Hybrid', desc: 'Light gate with LightGCN graph factors' },
+  { id: 'two_tower', name: 'Two-Tower', type: 'Deep Hybrid', desc: 'User tower · Item tower (graph + SBERT)' },
+  { id: 'transformer', name: 'Transformer Fusion', type: 'Deep Hybrid', desc: 'Self-attention over candidates' },
   { id: 'two_stage', name: 'Two-Stage Retrieval', type: 'Deep Hybrid', desc: 'CF + CB Candidate Union -> Reranking' },
   { id: 'als', name: 'Alternating Least Squares (ALS)', type: 'Collaborative', desc: 'Implicit matrix factorization (factors=32, min_interactions=3)' },
   { id: 'bpr', name: 'Bayesian Personalized Ranking (BPR)', type: 'Collaborative', desc: 'Pairwise ranking optimization (factors=32, min_interactions=3)' },
@@ -48,6 +52,7 @@ export default function App() {
   const [wishlistItems, setWishlistItems] = useState<any[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [historyInput, setHistoryInput] = useState<string>('');
+  const [historyInfo, setHistoryInfo] = useState<{ size: number; source: string }>({ size: 0, source: 'none' });
 
   const cartCount = cartItems.reduce((s, it) => s + (it.qty || 1), 0);
   const wishlist = new Set(wishlistItems.map(it => it.item_idx));
@@ -95,6 +100,7 @@ export default function App() {
       setLatencyMs(data.latency_ms || 0);
       setModelStatus(data.model_status || {});
       setSbertDim(typeof data.sbert_dim === 'number' ? data.sbert_dim : null);
+      setHistoryInfo({ size: Number(data.history_size || 0), source: String(data.history_source || 'none') });
       if (data.customer_id) setResolvedUser({ customer_id: data.customer_id, user_idx: data.user_idx, user_status: data.user_status || 'Verified' });
     } catch (e: any) {
       console.error(e);
@@ -104,6 +110,15 @@ export default function App() {
   };
 
   useEffect(() => { fetchRecs(customerId, model, alpha); }, [customerId, model, topK]);
+
+  // Re-run when the alpha slider settles (debounced) so the fusion weight
+  // visibly changes the ranking instead of waiting for the button click.
+  const firstAlpha = useRef(true);
+  useEffect(() => {
+    if (firstAlpha.current) { firstAlpha.current = false; return; }
+    const t = window.setTimeout(() => fetchRecs(customerId, model, alpha), 400);
+    return () => window.clearTimeout(t);
+  }, [alpha]);
 
   const runSim = async () => {
     setIsSimulating(true);
@@ -222,6 +237,7 @@ export default function App() {
                     <div>User: {resolvedUser.customer_id}</div>
                     <div>Status: {resolvedUser.user_status}</div>
                     <div>Latency: {latencyMs}ms{sbertDim ? ` · SBERT ${sbertDim}-d` : ''}</div>
+                    <div>History: {historyInfo.size} items{historyInfo.source === 'train_split' ? ' (auto · train split)' : historyInfo.source === 'request' ? ' (from input)' : ' — content branch off'}</div>
                     {modelStatus[model] && <div className="text-[10px] mt-1">Model: {modelStatus[model]}</div>}
                   </div>
                 )}
