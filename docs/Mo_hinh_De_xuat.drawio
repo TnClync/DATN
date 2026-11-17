@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-11-13T00:00:00.000Z" agent="opencode" version="24.7.17" type="device">
+<diagram name="1. Pipeline tổng thể" id="p_pipeline"><mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0" background="#ffffff"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="101" value="Pipeline tổng thể — Deep Hybrid Recommender (Amazon)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="300" y="10" width="570" height="30" as="geometry"/></mxCell><mxCell id="102" value="Dữ liệu
+• Reviews (lastone): 15,7M tương tác
+• Metadata (finaldata): 3,69M item" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="55" width="240" height="80" as="geometry"/></mxCell><mxCell id="103" value="Tiền xử lý (implicit)
+min_interactions ≥ 3, rating ≥ 4 → positive
+Chia train/val/test theo user, leak-free" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="320" y="55" width="270" height="80" as="geometry"/></mxCell><mxCell id="104" value="Không gian đánh giá
+2.464.371 item / 2.559.404 user
+(CF coverage: 93,87% item, 62,29% user)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="640" y="55" width="230" height="80" as="geometry"/></mxCell><mxCell id="105" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="102" target="103"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="106" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="103" target="104"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="107" value="ALS (implicit CF)
+Hu et al. 2008
+32-d" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="175" width="160" height="65" as="geometry"/></mxCell><mxCell id="108" value="BPR (pairwise)
+Rendle 2009
+32-d" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="210" y="175" width="160" height="65" as="geometry"/></mxCell><mxCell id="109" value="LightGCN (graph)
+He et al. 2020
+32-d, 2–3 lớp" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="390" y="175" width="170" height="65" as="geometry"/></mxCell><mxCell id="110" value="SBERT v2 (content)
+Reimers &amp; Gurevych 2019
+768-d, metadata-only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="580" y="175" width="190" height="65" as="geometry"/></mxCell><mxCell id="111" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="103" target="107"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="112" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="103" target="108"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="113" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="103" target="109"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="114" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="103" target="110"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="115" value="Stage 1 — Candidate Retrieval (per-user)
+Union Top-K từ ALS / BPR / LightGCN / SBERT → dedup (~100–250)
+Protocol: 1 positive + 99 negative (seed cố định, cùng candidate cho mọi model)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="170" y="285" width="430" height="70" as="geometry"/></mxCell><mxCell id="116" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="107" target="115"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="117" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="108" target="115"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="118" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="109" target="115"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="119" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="110" target="115"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="120" value="Late Fusion V3 (tuyến tính)
+z_cf, z_bpr, z_txt (per-user)
+score = 0,35·z_cf+0,35·z_bpr+0,30·z_txt
+Recall@10 = 0,7736" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="400" width="210" height="85" as="geometry"/></mxCell><mxCell id="121" value="Early Fusion V3 (TRIỂN KHAI)
+Input 1.669-d, DCN 3 lớp + MLP
+512→256→128→1, listwise softmax
+Recall@10 = 0,9004 [0,8922; 0,9084]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="270" y="400" width="230" height="85" as="geometry"/></mxCell><mxCell id="122" value="RGH v4 (NGHIÊN CỨU)
+Neo a_cf·z_cf+a_gcn·z_gcn+a_txt·z_txt
++ gate g·Δ (DCN cross + MLP)
+HR@10 = 0,7983 vs LightGCN 0,7415" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="530" y="400" width="230" height="85" as="geometry"/></mxCell><mxCell id="123" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="115" target="120"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="124" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="115" target="121"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="125" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="115" target="122"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="126" value="Stage 2 — Xếp hạng &amp; Kiểm định
+HR/NDCG/MRR/Recall @5,10,20 (Recall≡HR khi 1 positive)
+Bootstrap CI95 (2.000 lần) · Wilcoxon signed-rank · McNemar exact (per-user, paired)
+Mở rộng 20k user: EF 0,8998 — kết luận ổn định" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="170" y="530" width="430" height="75" as="geometry"/></mxCell><mxCell id="127" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="120" target="126"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="128" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="121" target="126"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="129" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="122" target="126"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram name="2. RGH v4 (Residual Gated Hybrid)" id="p_rgh"><mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0" background="#ffffff"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="201" value="RGH v4 — CF-Anchored Residual Gated Hybrid (kiến trúc nghiên cứu)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="250" y="10" width="670" height="30" as="geometry"/></mxCell><mxCell id="202" value="Đầu vào (mỗi cặp user–item trong 100 ứng viên)
+• Điểm nhánh: s_ALS, s_BPR, s_GCN, s_SBERT
+• Chuẩn hoá per-user: z_cf, z_bpr, z_gcn, z_txt
+• Đặc trưng 6-d cho Δ/gate:
+  [z_als, z_bpr, z_gcn, z_txt,  z_als−z_gcn,  z_als·z_txt]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="55" width="330" height="120" as="geometry"/></mxCell><mxCell id="203" value="Neo tuyến tính (linear anchor)
+score_lin = a_cf·z_cf + a_gcn·z_gcn + a_txt·z_txt
+Khởi tạo: 0,60 / 0,30 / 0,10
+Học được: 0,735 / 0,499 / 0,299 (20 epoch)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="420" y="55" width="330" height="90" as="geometry"/></mxCell><mxCell id="204" value="Residual phi tuyến Δ (DCN cross + deep MLP)
+x0 = feats (6-d)
+x1 = x0 ⊙ tanh(W1·x0) + x0
+x2 = x0 ⊙ tanh(W2·x1) + x1
+Δ = MLP(x2): 6 → 64 → ReLU → 32 → ReLU → 1 (dropout 0,1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="420" y="170" width="330" height="110" as="geometry"/></mxCell><mxCell id="205" value="Cổng per-(user,item)
+g = σ(MLP_g(feats)),  MLP_g: 6 → 32 → ReLU → 1
+bias khởi tạo = −2,5  ⇒  g ≈ 0,08 lúc đầu
+(gate chỉ “mở” khi residual thực sự giảm loss)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="420" y="305" width="330" height="85" as="geometry"/></mxCell><mxCell id="206" value="Điểm xếp hạng cuối
+
+score(u,i) = score_lin + g(u,i) · Δ(u,i)
+
+→ argsort giảm dần trên 100 ứng viên
+
+HR@10 = 0,7983 (holdout N=7.500)
+NDCG@10 = 0,6374, MRR = 0,5945" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="810" y="160" width="300" height="120" as="geometry"/></mxCell><mxCell id="207" value="Lý do thiết kế
+• Neo CF: không phá thứ tự CF (tránh LightGated/Deep EF cũ thua ALS)
+• Per-user z-score: bỏ lệch thang điểm giữa nhánh
+• Gate âm + residual (He et al. 2016): khởi đầu ≈ ALS, an toàn
+• Gate per-pair: xử lý warm/cold khác nhau
+• So công bằng: vs LightGCN (cùng phủ 100% user)
+  +5,68 điểm; không claim vượt GBDT (LambdaRank 0,8028)
+• Bug v2 (lệch index CF↔SBERT) → 0,7427; sửa map → 0,7983" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="210" width="330" height="190" as="geometry"/></mxCell><mxCell id="208" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="202" target="203"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="209" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="202" target="204"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="210" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="202" target="205"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="211" value="giải thích" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;dashed=1;endArrow=open;" edge="1" parent="1" source="202" target="207"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="212" value="a_cf·z_cf+a_gcn·z_gcn+a_txt·z_txt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="203" target="206"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="213" value="Δ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="204" target="206"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="214" value="g" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="205" target="206"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram name="3. Early Fusion V3 (Triển khai)" id="p_ef"><mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0" background="#ffffff"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="301" value="Early Fusion V3 — Mô hình triển khai chính (DCN + MLP + Listwise)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="240" y="10" width="690" height="30" as="geometry"/></mxCell><mxCell id="302" value="Đầu vào ghép sớm — 1.669 chiều / (u,i)
+• u_als ‖ i_als  (32 + 32), L2-norm
+• u_bpr ‖ i_bpr  (32 + 32), L2-norm
+• u_txt ‖ i_txt  (768 + 768), L2-norm
+  (u_txt = mean embedding train history, leak-free)
+• z_cf, z_bpr, z_txt  (3) — z-score per-user
+• log1p(pop)/max, log1p(hist)/max  (2)
+
+Tổng = 2·(32+32+768) + 5 = 1.669
+→ Giữ embedding thô để cross network học tương tác
+   CF×content (không chỉ 3 điểm như Late Fusion)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="55" width="360" height="200" as="geometry"/></mxCell><mxCell id="303" value="Nhánh 1 — Cross network (3 lớp, residual)
+x0 = input (1.669)
+x_{l+1} = x0 ⊙ tanh(W_l · x_l) + x_l,  l=0,1,2
+W_l: 1.669×1.669, không bias, init N(0; 0,02)
+→ Tương tác bậc cao có kiểm soát giữa CF &amp; content" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="440" y="55" width="330" height="135" as="geometry"/></mxCell><mxCell id="304" value="Nhánh 2 — Deep MLP
+1.669 → 512  (ReLU, dropout 0,2)
+      → 256  (ReLU, dropout 0,1)
+      → 128  (ReLU)
+      →   1
+
+AdamW lr=1e-3, weight decay=1e-4
+grad-clip 1,0 · tối đa 10 epoch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="440" y="215" width="330" height="150" as="geometry"/></mxCell><mxCell id="305" value="Residual readout
+
+score(x) = deep(x) + mean(x_cross)
+
+(1 điểm / ứng viên, xếp hạng 100 ứng viên)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="820" y="120" width="300" height="90" as="geometry"/></mxCell><mxCell id="306" value="Hàm mất mát &amp; chọn mô hình
+Listwise sampled softmax (T = 0,2)
+L = −log[ exp(s_pos/T) / Σ_i exp(s_i/T) ]
+Nhóm: 1 positive + 40 negative (train)
+Đánh giá: 1 positive + 99 negative
+Checkpoint theo NDCG@10 validation
+Test chỉ chạy 1 lần" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="820" y="240" width="300" height="140" as="geometry"/></mxCell><mxCell id="307" value="Vì sao là mô hình triển khai chính (mục 6.7)
+• Recall@10 = 0,9004  (CI95 [0,8922; 0,9084])
+  NDCG@10 = 0,7305, MRR = 0,6819
+• +33,3% tương đối vs ALS (0,6752); +22,2% vs ALS+BPR
+• CI95 không chồng lấn; McNemar 1.194:68 (p=1,3e-266)
+  thắng 2.906 / thua 377 / hoà 1.717 user
+• Không phụ thuộc coverage CF (62,29% user)
+• Ổn định: 20k user → 0,8998 [0,8957; 0,9038]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="30" y="290" width="360" height="170" as="geometry"/></mxCell><mxCell id="308" value="x0 (1.669-d)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="302" target="303"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="309" value="x (1.669-d)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="302" target="304"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="310" value="mean(x_cross)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="303" target="305"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="311" value="deep(x)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="304" target="305"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="312" value="scores nhóm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="305" target="306"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+<diagram name="4. Late Fusion V3" id="p_lf"><mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0" background="#ffffff"><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="401" value="Late Fusion V3 — Trộn tuyến tính có chuẩn hoá (mốc so sánh)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="280" y="10" width="610" height="30" as="geometry"/></mxCell><mxCell id="402" value="ALS
+s_ALS = u_als · i_als (32-d)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="60" y="80" width="220" height="80" as="geometry"/></mxCell><mxCell id="403" value="BPR
+s_BPR = u_bpr · i_bpr (32-d)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="320" y="80" width="220" height="80" as="geometry"/></mxCell><mxCell id="404" value="SBERT v2
+s_SBERT = u_txt · i_txt (768-d)
+u_txt = mean(train history)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="580" y="80" width="220" height="80" as="geometry"/></mxCell><mxCell id="405" value="z_cf = z_user(s_ALS)
+chuẩn hoá trên 100 ứng viên" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="60" y="200" width="220" height="70" as="geometry"/></mxCell><mxCell id="406" value="z_bpr = z_user(s_BPR)
+chuẩn hoá trên 100 ứng viên" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="320" y="200" width="220" height="70" as="geometry"/></mxCell><mxCell id="407" value="z_txt = z_user(s_SBERT)
+chuẩn hoá trên 100 ứng viên" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="580" y="200" width="220" height="70" as="geometry"/></mxCell><mxCell id="408" value="Điểm tuyến tính (chỉ 3 tham số)
+
+score(u,i) = 0,35 · z_cf + 0,35 · z_bpr + 0,30 · z_txt
+
+Trọng số: grid trên simplex (step 0,05)
+chọn theo HR@10 validation (val = 0,7905)
+Lưới có (1,0,0) ⇒ không tệ hơn ALS trên val" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="220" y="320" width="420" height="110" as="geometry"/></mxCell><mxCell id="409" value="Kết quả (1+99, N=5.000)
+Recall@10 = 0,7736  (CI95 [0,7618; 0,7850])
+NDCG@10 = 0,5846   ·   MRR = 0,5327
+Recall@5 = 0,6940   ·   Recall@20 = 0,8404
+
+V2 (SBERT cũ) 0,7472 → V3 0,7736 (+2,64) nhờ rebuild v4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="220" y="470" width="420" height="110" as="geometry"/></mxCell><mxCell id="410" value="Vai trò trong đồ án
+• Trần của kết hợp tuyến tính
+• Khoảng cách tới EF V3 (0,7736 → 0,9004,
+  +12,68 điểm) = bằng chứng định lượng cho
+  giá trị của phi tuyến + listwise
+
+Vì sao không chọn triển khai
+• Trọng số hằng số toàn cục, không
+  điều kiện hoá theo (user,item)
+• Không học được tương tác CF × content
+• User ít lịch sử / thiếu factor CF
+  không được xử lý thích nghi
+
+Vẫn hữu ích vì
+• 3 tham số, không GPU, suy luận tức thời
+• Dễ giải thích, tái lập" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="1"><mxGeometry x="840" y="110" width="300" height="360" as="geometry"/></mxCell><mxCell id="411" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="402" target="405"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="412" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="403" target="406"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="413" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="404" target="407"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="414" value="w=0,35" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="405" target="408"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="415" value="w=0,35" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="406" target="408"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="416" value="w=0,30" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="407" target="408"><mxGeometry relative="1" as="geometry"/></mxCell><mxCell id="417" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#666666;fontSize=10;" edge="1" parent="1" source="408" target="409"><mxGeometry relative="1" as="geometry"/></mxCell></root></mxGraphModel></diagram>
+</mxfile>
